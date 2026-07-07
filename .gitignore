@@ -1,0 +1,20 @@
+# Local tooling state (Claude Code), not project source
+.claude/
+
+# Real sample invoices — contain actual Colombian business data (NITs,
+# company names, transaction amounts). Kept out of this public repo.
+# Needed locally to run internal/adapters/driven/xmlparser tests.
+sample-invoices/
+
+# Environment
+.env
+
+# Go build artifacts
+/cifrato
+/cifrato.exe
+*.exe
+*.test
+
+# OS
+.DS_Store
+Thumbs.db

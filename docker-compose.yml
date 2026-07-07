@@ -1,0 +1,21 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: cifrato-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: cifrato
+      POSTGRES_PASSWORD: cifrato
+      POSTGRES_DB: cifrato
+    ports:
+      - "5432:5432"
+    volumes:
+      - cifrato_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U cifrato -d cifrato"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  cifrato_pgdata:
