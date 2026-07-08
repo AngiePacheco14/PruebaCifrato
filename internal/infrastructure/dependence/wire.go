@@ -28,7 +28,7 @@ func NewWire() *dig.Container {
 	container := dig.New()
 
 	container.Provide(postgres.ConfigFromEnv)
-	container.Provide(postgres.Open)
+	container.Provide(postgres.OpenAndMigrate)
 
 	container.Provide(func(db *gorm.DB) repository.InvoiceRepository {
 		return postgres.NewInvoiceRepository(db)

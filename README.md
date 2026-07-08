@@ -76,12 +76,15 @@ concepto clasificado — ver [Clasificación sin cola de revisión humana](#clas
 cp .env.example .env          # ajustar si es necesario
 docker compose up -d          # levanta Postgres en localhost:5432
 
-go run ./cmd/cifrato migrate  # crea el esquema Y carga los datos de referencia
-                               # (ciudades, conceptos, UVT, tarifas) — ver Migraciones abajo
-
 export ANTHROPIC_API_KEY=sk-ant-...   # opcional pero recomendado
 go run ./cmd/cifrato serve            # levanta el servidor HTTP en :8080
+                                       # migra el esquema solo, al arrancar (ver Migraciones abajo)
 ```
+
+`cifrato serve` migra automáticamente la primera vez que necesita la conexión a Postgres — no
+hace falta correr `migrate` antes, igual que en `bia-electronic-bills`. Si preferís forzar la
+migración por separado (CI, verificarla antes de levantar el servidor), `go run ./cmd/cifrato
+migrate` sigue disponible y hace exactamente lo mismo a mano.
 
 Procesar una factura de muestra:
 
@@ -138,6 +141,7 @@ parseo/negocio responden `4xx` con `{"error": "..."}`.
 | Variable | Default | Uso |
 |---|---|---|
 | `DB_HOST`, `DB_PORT`, `DB_USER`, `DB_PASSWORD`, `DB_NAME`, `DB_SSLMODE` | ver `.env.example` | conexión a Postgres |
+| `RUN_MIGRATIONS` | `true` | si `false`, `cifrato serve` abre la conexión sin migrar — para cuando la migración se corre aparte (ej. como paso de CI) |
 | `VAT_WITHHOLDING_AGENT` | `false` | si la empresa compradora es agente de retención de IVA (a nivel de compañía, no por factura) |
 | `ANTHROPIC_API_KEY` | — | credencial del SDK de Anthropic; sin ella, la clasificación LLM falla por línea (no bloquea la factura) |
 | `CLASSIFIER_MODEL` | `claude-haiku-4-5` | modelo usado para clasificar líneas — tarea simple, no justifica un modelo más caro |
@@ -181,14 +185,40 @@ El esquema vive en `internal/infrastructure/adapters/repository/postgres/migrati
 real (`.up.sql`/`.down.sql`), no como `gorm.AutoMigrate` sobre los structs de `model/`. GORM
 sigue siendo el ORM para leer/escribir en runtime, pero deja de ser la fuente de verdad del
 esquema — eso ahora es código versionado y revisable como cualquier otro cambio. La primera
-migración (`000001_init_schema_and_seed`) trae, además del esquema, los datos base (ciudades,
-conceptos, UVT, tarifas) — sin ellos el motor no tiene ninguna regla que aplicar, así que
-separar "crear tablas" de "cargar datos mínimos" en dos pasos no aportaba nada. El runner
-(`postgres.Migrate`) embebe las migraciones en el binario (`//go:embed migrations/*.sql`) y
-reutiliza la conexión que ya administra GORM, sin abrir una segunda. El `.down.sql` ya existe
-y está listo para revertir el esquema, pero **`cifrato` todavía no expone un comando `migrate
-down`** — hoy solo se corre `Up()`; un rollback real requeriría correrlo manualmente contra la
-base (`psql` o el CLI de `golang-migrate` instalado aparte) hasta que se cablee un subcomando.
+migración (`01_init_schema_and_seed`, numeración de 2 dígitos como en `bia-electronic-bills`)
+trae, además del esquema, los datos base (ciudades, conceptos, UVT, tarifas) — sin ellos el
+motor no tiene ninguna regla que aplicar, así que separar "crear tablas" de "cargar datos
+mínimos" en dos pasos no aportaba nada. El runner (`postgres.Migrate`) embebe las migraciones
+en el binario (`//go:embed migrations/*.sql`) y reutiliza la conexión que ya administra GORM,
+sin abrir una segunda. El `.down.sql` ya existe y está listo para revertir el esquema, pero
+**`cifrato` todavía no expone un comando `migrate down`** — hoy solo se corre `Up()`; un
+rollback real requeriría correrlo manualmente contra la base (`psql` o el CLI de
+`golang-migrate` instalado aparte) hasta que se cablee un subcomando.
+
+### Auto-migrar al arrancar, como bia-electronic-bills
+`cifrato serve` migra el esquema automáticamente, sin necesidad de correr `migrate` antes —
+igual que bia, donde la migración corre dentro del proceso la primera vez que algo pide una
+conexión a Postgres (efecto colateral de cómo `dig` resuelve el grafo de dependencias de forma
+perezosa). En Cifrato, `internal/infrastructure/dependence/wire.go` cablea
+`postgres.OpenAndMigrate` (no `postgres.Open`) como proveedor de `*gorm.DB`: abre la conexión y,
+si `RUN_MIGRATIONS` es `true` (default), corre `Migrate` antes de devolverla — se dispara la
+primera vez que `router.NewRouter(container)` fuerza la resolución completa del contenedor.
+`cifrato migrate` sigue existiendo tal cual, para forzar la migración a mano (CI, verificarla
+antes de levantar el servidor) sin depender del flag.
+
+**Trade-off** (el mismo que tiene bia): el arranque de `serve` queda bloqueado hasta que la
+migración termine o falle — no hay health-check de Postgres explícito antes de ese punto, ni en
+bia ni en Cifrato. Para esta prueba (una sola instancia, sin réplicas) es aceptable; en un
+despliegue multi-réplica real valdría la pena mover la migración a un paso previo explícito
+(exactamente lo que `RUN_MIGRATIONS=false` + `cifrato migrate` ya permiten hoy).
+
+**Lo que no se pudo copiar literalmente de bia**: la construcción real del cliente Postgres y
+el pooling de conexiones en bia viven dentro de `bia-commons-go/postgresql/v2`, un módulo
+privado de la empresa no accesible fuera de su organización — no hay forma de leer su código
+fuente ni sus valores reales de pool. Bia tampoco expone ningún `SetMaxOpenConns`/
+`SetMaxIdleConns` en su propio repo (está delegado enteramente a esa librería), así que lo que
+Cifrato ya tenía (pooling explícito en `connection.go`, sin cambios en este punto) es, de
+hecho, más explícito que lo visible en el propio repo de bia.
 
 ### `dig` para inyección de dependencias
 `internal/infrastructure/dependence/wire.go` define `NewWire() *dig.Container`: un único

@@ -49,3 +49,24 @@ func Migrate(db *gorm.DB) error {
 	}
 	return nil
 }
+
+// OpenAndMigrate opens the connection and, if cfg.RunMigrations is true,
+// applies pending migrations before returning it — the same pattern
+// bia-electronic-bills uses (migrations run automatically as a side effect
+// of constructing the DB client, gated by a RUN_MIGRATIONS-style toggle).
+// This is what the dig container wires up for `cifrato serve`; the
+// `cifrato migrate` CLI command calls Open + Migrate directly instead,
+// ignoring RunMigrations since it exists specifically to force a migration
+// regardless of the toggle.
+func OpenAndMigrate(cfg Config) (*gorm.DB, error) {
+	db, err := Open(cfg)
+	if err != nil {
+		return nil, err
+	}
+	if cfg.RunMigrations {
+		if err := Migrate(db); err != nil {
+			return nil, err
+		}
+	}
+	return db, nil
+}
