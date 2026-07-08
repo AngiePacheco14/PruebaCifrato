@@ -89,7 +89,8 @@ CREATE TABLE invoice_lines (
     concept_id                  BIGINT REFERENCES withholding_concepts (id),
     classification_confidence   DOUBLE PRECISION,
     created_at                  TIMESTAMPTZ,
-    updated_at                  TIMESTAMPTZ
+    updated_at                  TIMESTAMPTZ,
+    CONSTRAINT idx_invoice_lines_invoice_line_number UNIQUE (invoice_id, line_number)
 );
 CREATE INDEX idx_invoice_lines_invoice_id ON invoice_lines (invoice_id);
 CREATE INDEX idx_invoice_lines_sku ON invoice_lines (sku);

@@ -22,7 +22,12 @@ var _ repository.InvoiceRepository = (*InvoiceRepository)(nil)
 func (r *InvoiceRepository) Save(ctx context.Context, inv *entity.Invoice) error {
 	row := mappers.InvoiceToModel(inv)
 	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		if err := tx.Clauses(clause.OnConflict{
+		// Omit(clause.Associations) is required here: GORM's Create otherwise
+		// auto-saves the Lines association as a side effect, using its own
+		// default ON CONFLICT ("id") — which knows nothing about the
+		// (invoice_id, line_number) natural key below and collides with it on
+		// every re-import. Lines are persisted explicitly, right after this.
+		if err := tx.Omit(clause.Associations).Clauses(clause.OnConflict{
 			Columns: []clause.Column{{Name: "cufe"}},
 			DoUpdates: clause.AssignmentColumns([]string{
 				"invoice_number", "issue_date", "xml_type", "issuer_nit", "issuer_name",
@@ -33,17 +38,43 @@ func (r *InvoiceRepository) Save(ctx context.Context, inv *entity.Invoice) error
 		}).Create(row).Error; err != nil {
 			return fmt.Errorf("postgres: upserting invoice: %w", err)
 		}
-		if err := tx.Where("invoice_id = ?", row.ID).Delete(&model.InvoiceLineModel{}).Error; err != nil {
-			return fmt.Errorf("postgres: clearing previous invoice lines: %w", err)
-		}
 		for i := range row.Lines {
 			row.Lines[i].InvoiceID = row.ID
 		}
+
+		// Upsert lines by (invoice_id, line_number) instead of deleting and
+		// reinserting: that would hand every re-imported line a fresh
+		// auto-generated ID, breaking withholding_calculations' own upsert
+		// (keyed on invoice_line_id) — recalculating the same invoice would
+		// accumulate orphaned calculation rows instead of overwriting them,
+		// since the line ID they pointed at no longer existed. Keeping the
+		// same natural key across re-imports keeps the line's ID stable.
 		if len(row.Lines) > 0 {
-			if err := tx.Create(&row.Lines).Error; err != nil {
-				return fmt.Errorf("postgres: inserting invoice lines: %w", err)
+			if err := tx.Clauses(clause.OnConflict{
+				Columns: []clause.Column{{Name: "invoice_id"}, {Name: "line_number"}},
+				DoUpdates: clause.AssignmentColumns([]string{
+					"sku", "description", "quantity", "unit_price", "line_total",
+					"iva_rate", "iva_value", "concept_id", "classification_confidence", "updated_at",
+				}),
+			}).Create(&row.Lines).Error; err != nil {
+				return fmt.Errorf("postgres: upserting invoice lines: %w", err)
 			}
 		}
+
+		// Remove lines that no longer exist in this version of the invoice
+		// (e.g. a corrected re-upload with fewer lines than before).
+		keepIDs := make([]uint, len(row.Lines))
+		for i := range row.Lines {
+			keepIDs[i] = row.Lines[i].ID
+		}
+		q := tx.Where("invoice_id = ?", row.ID)
+		if len(keepIDs) > 0 {
+			q = q.Where("id NOT IN ?", keepIDs)
+		}
+		if err := q.Delete(&model.InvoiceLineModel{}).Error; err != nil {
+			return fmt.Errorf("postgres: removing stale invoice lines: %w", err)
+		}
+
 		inv.ID = row.ID
 		for i := range row.Lines {
 			inv.Lines[i].ID = row.Lines[i].ID

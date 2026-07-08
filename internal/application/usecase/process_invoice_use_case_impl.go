@@ -43,12 +43,17 @@ func (uc *ProcessInvoice) Execute(ctx context.Context, xmlData []byte, sourceXML
 	inv.SourceXMLPath = sourceXMLPath
 	inv.SourcePDFPath = sourcePDFPath
 
-	if err := uc.invoices.Save(ctx, inv); err != nil {
-		return nil, fmt.Errorf("usecase: saving invoice %s: %w", inv.CUFE, err)
-	}
-
+	// Classify before saving: classification only sets in-memory fields
+	// (ConceptID/ClassificationConfidence), it needs no DB-assigned IDs.
+	// Saving afterward means invoice_lines.concept_id is persisted correctly
+	// on the first (and only) write, instead of staying NULL forever because
+	// a later in-memory-only mutation was never written back.
 	if err := uc.classifyLines.Execute(ctx, inv); err != nil {
 		return nil, fmt.Errorf("usecase: classifying lines for invoice %s: %w", inv.CUFE, err)
+	}
+
+	if err := uc.invoices.Save(ctx, inv); err != nil {
+		return nil, fmt.Errorf("usecase: saving invoice %s: %w", inv.CUFE, err)
 	}
 
 	calculations, err := uc.calculateWithholdings.Execute(ctx, inv)
