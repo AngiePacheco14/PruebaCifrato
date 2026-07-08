@@ -135,11 +135,17 @@ CREATE TABLE line_classifications (
 CREATE INDEX idx_line_classifications_description_normalized ON line_classifications (description_normalized);
 CREATE INDEX idx_line_classifications_concept_id ON line_classifications (concept_id);
 
--- Solo guarda el último cálculo por (invoice_line_id, tax_type) —
--- recalcular sobrescribe, no se guarda historial.
+-- One row per (invoice, concept, tax_type) — the tariff/minimum-base check
+-- is evaluated on the base amount aggregated across every line of that
+-- concept in the invoice, not per line (RETEFUENTE/RETEICA's minimum base
+-- is a per-payment threshold, not a per-item one — DIAN evaluates it over
+-- what's owed to a provider for the transaction, not each line separately).
+-- concept_id has no FK (matches withholding_concepts' own choice here): 0 is
+-- the "lines with no classified concept" bucket, never a real concept row,
+-- so it can't collide with an actual concept ID. Recalculating overwrites,
+-- no history is kept.
 CREATE TABLE withholding_calculations (
     id                  BIGSERIAL PRIMARY KEY,
-    invoice_line_id     BIGINT NOT NULL,
     invoice_id          BIGINT NOT NULL,
     tax_type            VARCHAR(20) NOT NULL,
     concept_id          BIGINT NOT NULL,
@@ -150,9 +156,10 @@ CREATE TABLE withholding_calculations (
     justification       TEXT,
     created_at          TIMESTAMPTZ,
     updated_at          TIMESTAMPTZ,
-    CONSTRAINT idx_line_taxtype UNIQUE (invoice_line_id, tax_type)
+    CONSTRAINT idx_invoice_concept_taxtype UNIQUE (invoice_id, concept_id, tax_type)
 );
-CREATE INDEX idx_withholding_calculations_invoice_id ON withholding_calculations (invoice_id);
+-- No separate invoice_id index: the unique constraint above already leads
+-- with invoice_id, so Postgres can use it for invoice_id-only lookups too.
 CREATE INDEX idx_withholding_calculations_concept_id ON withholding_calculations (concept_id);
 
 -- ── Datos de referencia (mínimos para poder correr las retenciones) ────────

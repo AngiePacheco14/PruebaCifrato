@@ -24,9 +24,9 @@ var _ repository.CalculationRepository = (*CalculationRepository)(nil)
 func (r *CalculationRepository) Upsert(ctx context.Context, calc *entity.Calculation) error {
 	row := mappers.CalculationToModel(calc)
 	err := r.db.WithContext(ctx).Clauses(clause.OnConflict{
-		Columns: []clause.Column{{Name: "invoice_line_id"}, {Name: "tax_type"}},
+		Columns: []clause.Column{{Name: "invoice_id"}, {Name: "concept_id"}, {Name: "tax_type"}},
 		DoUpdates: clause.AssignmentColumns([]string{
-			"concept_id", "base_amount", "tariff_applied", "calculated_value",
+			"base_amount", "tariff_applied", "calculated_value",
 			"legal_basis", "justification", "updated_at",
 		}),
 	}).Create(row).Error

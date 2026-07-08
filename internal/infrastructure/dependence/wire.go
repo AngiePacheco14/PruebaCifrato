@@ -19,11 +19,8 @@ import (
 )
 
 // NewWire builds the dependency graph (Postgres, the LLM classifier, the XML
-// parser, and both use cases) as a dig.Container, the same composition-root
-// pattern bia-electronic-bills uses. Unlike the previous Google Wire setup,
-// wiring mistakes (a missing provider, a type nobody produces) only surface
-// at container.Invoke time, not at build time — there is no separate
-// codegen step to catch them earlier.
+// parser, and both use cases) as a dig.Container. Wiring mistakes surface at
+// container.Invoke time rather than at build time.
 func NewWire() *dig.Container {
 	container := dig.New()
 
@@ -46,12 +43,10 @@ func NewWire() *dig.Container {
 		return postgres.NewReferenceDataRepository(db)
 	})
 
-	// provideAnthropicClient reads ANTHROPIC_API_KEY from the environment
-	// (the SDK's own convention — see anthropic.Classifier).
+	// Reads ANTHROPIC_API_KEY from the environment.
 	container.Provide(func() anthropicsdk.Client { return anthropicsdk.NewClient() })
 	container.Provide(anthropic.ModelFromEnv)
-	// The withholding concept catalog is fetched once at startup; it never
-	// changes during the process lifetime (see anthropic.NewClassifier).
+	// Concept catalog is fetched once at startup.
 	container.Provide(func(referenceData repository.ReferenceDataRepository) ([]entity.Concept, error) {
 		return referenceData.ListConcepts(context.Background())
 	})

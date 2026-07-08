@@ -44,24 +44,22 @@ func (r *ReferenceDataRepository) ListConcepts(ctx context.Context) ([]entity.Co
 	return concepts, nil
 }
 
-// FindCityByName matches loosely, not by exact string equality: invoice XML
-// carries the issuer's own free-text CityName (e.g. "Bogotá, D.C.", with
-// accents and punctuation the issuer chose), while seeded reference cities
-// use a plain canonical form (e.g. "BOGOTA D.C"). Comparing normalized forms
-// (uppercased, accents folded, punctuation/spacing stripped) is what makes
-// "Bogotá, D.C." and "BOGOTA D.C" resolve to the same city. The cities table
-// is small (Colombian municipalities relevant to this deployment, not the
-// full national registry), so loading all rows once per invoice and
-// comparing in Go is simpler and more robust than replicating the same
-// normalization inside a SQL expression.
+// FindCityByName matches loosely (normalized + bidirectional substring),
+// since issuer XML city names rarely match the seeded canonical form exactly.
+// Known risk: substring matching can false-positive between distinct cities
+// sharing a prefix, e.g. "Girardot" vs the seeded "Girardota".
 func (r *ReferenceDataRepository) FindCityByName(ctx context.Context, name string) (*entity.City, error) {
 	var rows []model.CityModel
 	if err := r.db.WithContext(ctx).Find(&rows).Error; err != nil {
 		return nil, fmt.Errorf("postgres: listing cities: %w", err)
 	}
 	target := normalizeCityName(name)
+	if target == "" {
+		return nil, nil
+	}
 	for i := range rows {
-		if normalizeCityName(rows[i].Name) == target {
+		candidate := normalizeCityName(rows[i].Name)
+		if candidate == target || strings.Contains(target, candidate) || strings.Contains(candidate, target) {
 			return mappers.CityToDomain(&rows[i]), nil
 		}
 	}

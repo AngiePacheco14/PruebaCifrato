@@ -60,7 +60,6 @@ func CalculationToDomain(m *model.WithholdingCalculationModel) *entity.Calculati
 	}
 	return &entity.Calculation{
 		ID:              m.ID,
-		InvoiceLineID:   m.InvoiceLineID,
 		InvoiceID:       m.InvoiceID,
 		TaxType:         enums.TaxType(m.TaxType),
 		ConceptID:       conceptID,
@@ -72,10 +71,8 @@ func CalculationToDomain(m *model.WithholdingCalculationModel) *entity.Calculati
 	}
 }
 
-// CalculationToModel represents an unclassified line's Calculation.ConceptID
-// (nil) as 0 in the column: withholding_calculations.concept_id is NOT NULL
-// with no FK constraint, so 0 (never a real auto-generated ID) is safe as
-// the "no concept" sentinel — the domain itself only ever deals in nil.
+// CalculationToModel maps a nil ConceptID (unclassified line) to 0: the
+// concept_id column is NOT NULL with no FK constraint, so 0 is a safe sentinel.
 func CalculationToModel(c *entity.Calculation) *model.WithholdingCalculationModel {
 	var conceptID uint
 	if c.ConceptID != nil {
@@ -83,7 +80,6 @@ func CalculationToModel(c *entity.Calculation) *model.WithholdingCalculationMode
 	}
 	return &model.WithholdingCalculationModel{
 		ID:              c.ID,
-		InvoiceLineID:   c.InvoiceLineID,
 		InvoiceID:       c.InvoiceID,
 		TaxType:         string(c.TaxType),
 		ConceptID:       conceptID,

@@ -1,7 +1,6 @@
 package enums
 
-// TaxType are the official DIAN withholding tax acronyms, kept untranslated
-// since they are the exact legal names used in Colombian tax regulation.
+// TaxType is a DIAN withholding tax acronym.
 type TaxType string
 
 const (

@@ -26,9 +26,7 @@ responder por ambigüedad — el sistema no tiene una cola de revisión humana,
 siempre necesita una clasificación).`
 
 // Classifier implements repository.LineClassifier using the Anthropic
-// Messages API with a forced tool call for structured output. The concept
-// catalog is captured once at construction time — it does not change during
-// the process lifetime, so it is not re-fetched per call.
+// Messages API with a forced tool call for structured output.
 type Classifier struct {
 	client   anthropic.Client
 	model    string
@@ -37,11 +35,8 @@ type Classifier struct {
 	tool     anthropic.ToolParam
 }
 
-// NewClassifier builds the adapter from an already-constructed Anthropic
-// client, the model name, and the concept catalog (the caller fetches this
-// once via ReferenceDataRepository.ListConcepts in the composition root).
-// The tool schema is built once here, not per Classify call, since the
-// catalog never changes during the process lifetime.
+// NewClassifier builds the adapter from an Anthropic client, model name, and
+// concept catalog, building the tool schema once.
 func NewClassifier(client anthropic.Client, model string, concepts []entity.Concept) (*Classifier, error) {
 	if len(concepts) == 0 {
 		return nil, fmt.Errorf("anthropic: concepts catalog is empty")
@@ -69,8 +64,6 @@ func (c *Classifier) Classify(ctx context.Context, description string) (*entity.
 		ToolChoice: anthropic.ToolChoiceParamOfTool(toolName),
 	})
 	if err != nil {
-		// The SDK already retried 429/5xx internally (default max_retries=2);
-		// anything reaching here is a real, exhausted failure — propagate.
 		return nil, fmt.Errorf("anthropic: calling Anthropic API: %w", err)
 	}
 
@@ -79,8 +72,7 @@ func (c *Classifier) Classify(ctx context.Context, description string) (*entity.
 			return c.parseToolUse(v)
 		}
 	}
-	// tool_choice was forced, so this should not happen; if it does, it's
-	// a contract error, not a transient one — propagate rather than degrade.
+	// tool_choice was forced, so this should not happen.
 	return nil, fmt.Errorf("anthropic: response contained no tool_use block")
 }
 
@@ -106,9 +98,8 @@ func (c *Classifier) parseToolUse(v anthropic.ToolUseBlock) (*entity.LineClassif
 	}, nil
 }
 
-// buildTool constructs the classify_concept tool schema dynamically from
-// the concept catalog — the concept_code enum is never hardcoded, so a
-// concept added to the database is picked up without a code change.
+// buildTool constructs the classify_concept tool schema, deriving the
+// concept_code enum from the concept catalog.
 func (c *Classifier) buildTool() anthropic.ToolParam {
 	codes := make([]string, len(c.concepts))
 	for i, concept := range c.concepts {

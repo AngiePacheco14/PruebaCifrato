@@ -17,11 +17,9 @@ type WithholdingConceptModel struct {
 
 func (WithholdingConceptModel) TableName() string { return "withholding_concepts" }
 
-// AdditionalTaxRuleModel unifies RETEFUENTE, RETEIVA and RETEICA: all three
-// are structurally "a tariff percentage over a minimum base in UVT, valid in
-// a date range, for a concept". ICA "per thousand" rates are normalized to
-// their percentage equivalent at load time so TariffPercentage always means
-// the same thing regardless of TaxType.
+// AdditionalTaxRuleModel unifies RETEFUENTE, RETEIVA and RETEICA as a tariff
+// over a minimum base (UVT) for a concept and date range. ICA's "per thousand"
+// rates are normalized to a percentage at load time.
 type AdditionalTaxRuleModel struct {
 	ID               uint                    `gorm:"primaryKey"`
 	TaxType          string                  `gorm:"size:20;not null;index:idx_rule_lookup,priority:1"`
@@ -41,13 +39,13 @@ type AdditionalTaxRuleModel struct {
 func (AdditionalTaxRuleModel) TableName() string { return "additional_taxes_rules" }
 
 // WithholdingCalculationModel stores only the latest calculation per
-// (InvoiceLineID, TaxType) — recalculations overwrite, no history is kept.
+// (InvoiceID, ConceptID, TaxType); recalculations overwrite. BaseAmount is
+// aggregated across all lines of that concept, not a single line.
 type WithholdingCalculationModel struct {
 	ID              uint            `gorm:"primaryKey"`
-	InvoiceLineID   uint            `gorm:"not null;uniqueIndex:idx_line_taxtype,priority:1"`
-	InvoiceID       uint            `gorm:"not null;index"`
-	TaxType         string          `gorm:"size:20;not null;uniqueIndex:idx_line_taxtype,priority:2"`
-	ConceptID       uint            `gorm:"not null;index"`
+	InvoiceID       uint            `gorm:"not null;uniqueIndex:idx_invoice_concept_taxtype,priority:1"`
+	TaxType         string          `gorm:"size:20;not null;uniqueIndex:idx_invoice_concept_taxtype,priority:3"`
+	ConceptID       uint            `gorm:"not null;uniqueIndex:idx_invoice_concept_taxtype,priority:2;index"`
 	BaseAmount      decimal.Decimal `gorm:"type:numeric(18,2);not null"`
 	TariffApplied   decimal.Decimal `gorm:"type:numeric(7,4);not null"`
 	CalculatedValue decimal.Decimal `gorm:"type:numeric(18,2);not null"`

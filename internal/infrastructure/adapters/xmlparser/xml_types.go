@@ -2,11 +2,9 @@ package xmlparser
 
 import "encoding/xml"
 
-// Intermediate XML structs. Tags use local element names only (no
-// namespace), which lets encoding/xml match regardless of which prefix
-// (cbc:/cac:) a given document declares. All monetary/quantity fields are
-// kept as string and converted explicitly via decimal.go — encoding/xml has
-// no native support for decimal.Decimal.
+// Intermediate XML structs. Tags use local element names only, matching
+// regardless of namespace prefix. Monetary/quantity fields are kept as
+// string and converted via decimal.go.
 
 // --- Root: direct Invoice ---
 
@@ -23,10 +21,9 @@ type xmlInvoice struct {
 	InvoiceLine             []xmlInvoiceLine         `xml:"InvoiceLine"`
 }
 
-// --- Root: AttachedDocument. Only Attachment (direct child of the root) is
-// mapped; ParentDocumentLineReference is intentionally NOT defined here, so
-// encoding/xml silently ignores the nested ApplicationResponse CDATA that
-// lives under it — no content sniffing required. ---
+// --- Root: AttachedDocument. Only Attachment is mapped; the nested
+// ApplicationResponse under ParentDocumentLineReference is left undefined
+// so encoding/xml ignores it. ---
 
 type xmlAttachedDocument struct {
 	XMLName    xml.Name           `xml:"AttachedDocument"`

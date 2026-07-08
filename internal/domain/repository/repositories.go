@@ -10,7 +10,7 @@ import (
 
 type (
 	CalculationRepository interface {
-		// Upsert overwrites the previous calculation for (InvoiceLineID, TaxType).
+		// Upsert overwrites the previous calculation for (InvoiceID, ConceptID, TaxType).
 		Upsert(ctx context.Context, calc *entity.Calculation) error
 		ListByInvoice(ctx context.Context, invoiceID uint) ([]entity.Calculation, error)
 	}
@@ -21,10 +21,9 @@ type (
 		Save(ctx context.Context, entry *entity.ClassificationCacheEntry) error
 	}
 
-	// InvoiceParser parses raw UBL DIAN invoice XML bytes — either a direct
-	// Invoice or an AttachedDocument wrapping one — into the domain model. It
-	// does not populate SourceXMLPath/SourcePDFPath; the caller (future import
-	// use case) knows the file path and fills those in after a successful parse.
+	// InvoiceParser parses raw UBL DIAN invoice XML (direct Invoice or an
+	// AttachedDocument wrapping one) into the domain model. Does not populate
+	// SourceXMLPath/SourcePDFPath; the caller fills those in.
 	InvoiceParser interface {
 		Parse(xmlData []byte) (*entity.Invoice, error)
 	}
@@ -37,9 +36,8 @@ type (
 		ExistsByCUFE(ctx context.Context, cufe string) (bool, error)
 	}
 
-	// LineClassifier classifies a single invoice line description into one of
-	// the withholding concepts known to the system. Implementations must
-	// always return a non-nil result or a non-nil error — never both nil.
+	// LineClassifier classifies a line description into a withholding concept.
+	// Must return a non-nil result or a non-nil error, never both nil.
 	LineClassifier interface {
 		Classify(ctx context.Context, description string) (*entity.LineClassification, error)
 	}
@@ -53,8 +51,7 @@ type (
 
 	TaxRuleRepository interface {
 		// FindApplicable returns the tax rule valid at the given date for the
-		// given concept. cityID nil looks up a national rule (RETEFUENTE/RETEIVA);
-		// cityID set looks up a territorial ICA rule for that city.
+		// concept. cityID nil means national rule; set means territorial ICA rule.
 		FindApplicable(ctx context.Context, taxType enums.TaxType, conceptID uint, cityID *uint, at time.Time) (*entity.TaxRule, error)
 		ListByTaxType(ctx context.Context, taxType enums.TaxType) ([]entity.TaxRule, error)
 	}

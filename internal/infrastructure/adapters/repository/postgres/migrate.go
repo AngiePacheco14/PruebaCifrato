@@ -14,15 +14,9 @@ import (
 //go:embed migrations/*.sql
 var migrationsFS embed.FS
 
-// Migrate applies every pending SQL migration embedded from migrations/ —
-// schema plus the baseline reference data (cities, concepts, UVT, tax
-// rules) needed to run withholding calculations end-to-end. It reuses
-// gorm's own connection pool instead of opening a second one.
-//
-// SQL migrations (not gorm.AutoMigrate) are the source of truth here so the
-// schema — and the reference data it ships with — is versioned and
-// reviewable like any other change, with a real rollback path (.down.sql),
-// not just an idempotent "make it look like the struct" pass.
+// Migrate applies every pending SQL migration embedded from migrations/,
+// including baseline reference data (cities, concepts, UVT, tax rules).
+// Reuses gorm's own connection pool instead of opening a second one.
 func Migrate(db *gorm.DB) error {
 	sqlDB, err := db.DB()
 	if err != nil {
@@ -51,13 +45,8 @@ func Migrate(db *gorm.DB) error {
 }
 
 // OpenAndMigrate opens the connection and, if cfg.RunMigrations is true,
-// applies pending migrations before returning it — the same pattern
-// bia-electronic-bills uses (migrations run automatically as a side effect
-// of constructing the DB client, gated by a RUN_MIGRATIONS-style toggle).
-// This is what the dig container wires up for `cifrato serve`; the
-// `cifrato migrate` CLI command calls Open + Migrate directly instead,
-// ignoring RunMigrations since it exists specifically to force a migration
-// regardless of the toggle.
+// applies pending migrations before returning it. Used by `cifrato serve`;
+// `cifrato migrate` calls Open + Migrate directly, ignoring the toggle.
 func OpenAndMigrate(cfg Config) (*gorm.DB, error) {
 	db, err := Open(cfg)
 	if err != nil {

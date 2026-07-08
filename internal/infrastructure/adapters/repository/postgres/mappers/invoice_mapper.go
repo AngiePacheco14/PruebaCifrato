@@ -66,9 +66,8 @@ func ModelToInvoice(m *model.InvoiceModel) *entity.Invoice {
 	}
 }
 
-// InvoiceLineToModel deliberately omits ID: it is only used to build lines
-// for a fresh insert (Save always deletes and reinserts lines), so leaving
-// it zero lets GORM auto-generate it.
+// InvoiceLineToModel omits ID so GORM can auto-generate it; Save upserts
+// lines by (invoice_id, line_number), not by ID.
 func InvoiceLineToModel(l *entity.InvoiceLine) *model.InvoiceLineModel {
 	return &model.InvoiceLineModel{
 		InvoiceID:                l.InvoiceID,

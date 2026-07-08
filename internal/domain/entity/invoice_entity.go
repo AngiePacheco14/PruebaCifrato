@@ -25,9 +25,8 @@ type Invoice struct {
 	InvoiceTotal            decimal.Decimal
 	SourceXMLPath           string
 	SourcePDFPath           string
-	// ReportedRetefuente/Reteiva/Reteica are the values the supplier already
-	// reports in WithholdingTaxTotal. Informational only, used for
-	// cross-validation against the engine's own calculation.
+	// ReportedRetefuente/Reteiva/Reteica are the supplier-reported values from
+	// WithholdingTaxTotal, used for cross-validation only.
 	ReportedRetefuente *decimal.Decimal
 	ReportedReteiva    *decimal.Decimal
 	ReportedReteica    *decimal.Decimal

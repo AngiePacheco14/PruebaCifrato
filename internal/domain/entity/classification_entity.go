@@ -1,9 +1,7 @@
 package entity
 
-// ClassificationCacheEntry represents the LLM classification cache — a
-// self-feeding cache keyed by (issuer_nit, sku) or by normalized
-// description, so the same line description is never sent to the LLM
-// twice.
+// ClassificationCacheEntry is an LLM classification cache entry, keyed by
+// (issuer_nit, sku) or by normalized description.
 type ClassificationCacheEntry struct {
 	ID                    uint
 	IssuerNIT             *string
@@ -16,9 +14,8 @@ type ClassificationCacheEntry struct {
 }
 
 // LineClassification is the LLM's answer for one invoice line description.
-// ConceptID is already resolved against the in-memory concept catalog by
-// the adapter — callers never need to know about ConceptCode beyond
-// auditing/debugging.
+// ConceptID is already resolved against the concept catalog; ConceptCode is
+// for auditing/debugging only.
 type LineClassification struct {
 	ConceptID    uint
 	ConceptCode  string

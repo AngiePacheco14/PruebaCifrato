@@ -9,7 +9,6 @@ func toProcessInvoiceResponse(result *in.ProcessInvoiceResult) dto.ProcessInvoic
 	calculations := make([]dto.CalculationDTO, len(result.Calculations))
 	for i, calc := range result.Calculations {
 		calculations[i] = dto.CalculationDTO{
-			InvoiceLineID:   calc.InvoiceLineID,
 			TaxType:         string(calc.TaxType),
 			ConceptID:       calc.ConceptID,
 			BaseAmount:      calc.BaseAmount.String(),
@@ -27,6 +26,11 @@ func toProcessInvoiceResponse(result *in.ProcessInvoiceResult) dto.ProcessInvoic
 		IssuerNIT:     inv.IssuerNIT,
 		IssuerName:    inv.IssuerName,
 		InvoiceTotal:  inv.InvoiceTotal.String(),
-		Calculations:  calculations,
+		Summary: dto.SummaryDTO{
+			TotalRetefuente: result.Summary.TotalRetefuente.String(),
+			TotalReteiva:    result.Summary.TotalReteiva.String(),
+			TotalReteica:    result.Summary.TotalReteica.String(),
+		},
+		Calculations: calculations,
 	}
 }

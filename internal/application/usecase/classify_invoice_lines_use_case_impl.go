@@ -25,31 +25,16 @@ var _ in.ClassifyInvoiceLines = (*ClassifyInvoiceLines)(nil)
 
 var multiSpace = regexp.MustCompile(`\s+`)
 
-// normalizeDescription builds the cache key for DescriptionNormalized: a
-// simple, deterministic transform (lowercase, trimmed, collapsed internal
-// whitespace) — not NLP. No accent-stripping: it's a cache key, not a
-// semantic match, and unicode normalization would need a real
-// transliteration table to do correctly.
+// normalizeDescription builds the cache key: lowercase, trimmed, collapsed
+// whitespace. No accent-stripping — this is a cache key, not a semantic match.
 func normalizeDescription(s string) string {
 	s = strings.ToLower(strings.TrimSpace(s))
 	return multiSpace.ReplaceAllString(s, " ")
 }
 
-// Execute never fails the whole invoice because a single line's LLM call
-// failed (network error, exhausted retries, unexpected response) — that
-// line is simply left with ConceptID/ClassificationConfidence nil, which
-// the withholding engine already handles gracefully ("no aplica: línea sin
-// concepto clasificado"), the same path as a never-classified line. This
-// keeps the pipeline non-blocking (no human review queue). The failure is
-// logged for observability, since repeated failures across many lines may
-// indicate a systemic problem (e.g. an invalid API key) worth
-// investigating even though it doesn't halt the batch.
-//
-// Execute DOES return an error when the classification cache itself fails
-// to read or write — that is an infrastructure failure analogous to how
-// calculate_withholdings_use_case_impl.go treats
-// TaxRuleRepository/CalculationRepository errors, not a per-line business
-// edge case.
+// Execute leaves a line unclassified (nil ConceptID) and logs it if the LLM
+// call fails, rather than failing the whole invoice. It only returns an
+// error on cache read/write failures.
 func (uc *ClassifyInvoiceLines) Execute(ctx context.Context, inv *entity.Invoice) error {
 	for i := range inv.Lines {
 		line := &inv.Lines[i]

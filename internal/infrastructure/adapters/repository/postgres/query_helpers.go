@@ -7,10 +7,8 @@ import (
 	"gorm.io/gorm"
 )
 
-// findOne runs the given query against dest and translates
-// gorm.ErrRecordNotFound into a nil result instead of an error — the
-// "not found means nil, nil" shape every FindByX repository method needs.
-// errCtx labels the wrapped error message on any other failure.
+// findOne runs q against dest, translating gorm.ErrRecordNotFound into
+// (nil, nil) instead of an error. errCtx labels the wrapped error message.
 func findOne[T any](q *gorm.DB, dest *T, errCtx string) (*T, error) {
 	err := q.First(dest).Error
 	if errors.Is(err, gorm.ErrRecordNotFound) {

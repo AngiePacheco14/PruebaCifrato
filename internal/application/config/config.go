@@ -5,15 +5,8 @@ import (
 	"strconv"
 )
 
-// Config holds application-level (not infrastructure) settings: whether the
-// buyer (this company — single-tenant, no per-invoice variation) is a VAT
-// withholding agent. When false, RETEIVA is never withheld, for any invoice
-// or line.
-//
-// Which Claude model classifies invoice lines is an infrastructure detail
-// of the anthropic adapter, not a business rule — it lives in
-// anthropic.ModelFromEnv(), analogous to postgres.ConfigFromEnv(), not
-// here.
+// Config holds application-level settings: whether the buyer is a VAT
+// withholding agent. When false, RETEIVA is never withheld.
 type Config struct {
 	IsVATWithholdingAgent bool
 }

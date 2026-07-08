@@ -9,12 +9,9 @@ import (
 	"cifrato/internal/domain/enums"
 )
 
-// CalculateWithMinimumBase implements the RETEFUENTE/RETEICA pattern: the
-// tariff applies only if baseAmount (pre-tax) is at or above rule.MinBaseUVT
-// expressed in pesos for the given uvtValue. Equal to the minimum DOES
-// apply (standard DIAN practice: "igual o superior"). Identity fields
-// (ID/InvoiceLineID/InvoiceID/ConceptID) are left zero — the caller fills
-// those in.
+// CalculateWithMinimumBase applies the RETEFUENTE/RETEICA tariff only if
+// baseAmount is at or above rule.MinBaseUVT in pesos; equal to the minimum
+// does apply. Identity fields (ID/InvoiceID/ConceptID) are left zero.
 func CalculateWithMinimumBase(rule entity.TaxRule, uvtValue decimal.Decimal, baseAmount decimal.Decimal) entity.Calculation {
 	minPesos := rule.MinBaseUVT.Mul(uvtValue).Round(2)
 	base := baseAmount.Round(2)
@@ -35,10 +32,8 @@ func CalculateWithMinimumBase(rule entity.TaxRule, uvtValue decimal.Decimal, bas
 	return newCalculation(rule, base, rule.TariffPercentage, value, justification)
 }
 
-// CalculateReteiva implements the RETEIVA pattern: the tariff applies
-// directly over ivaValue, with no UVT minimum (business decision — RETEIVA
-// has none, unlike RETEFUENTE/RETEICA). Zero IVA on the line means nothing
-// to withhold.
+// CalculateReteiva applies the tariff directly over ivaValue, with no UVT
+// minimum. Zero or negative IVA means nothing to withhold.
 func CalculateReteiva(rule entity.TaxRule, ivaValue decimal.Decimal) entity.Calculation {
 	iva := ivaValue.Round(2)
 
@@ -51,9 +46,7 @@ func CalculateReteiva(rule entity.TaxRule, ivaValue decimal.Decimal) entity.Calc
 	return newCalculation(rule, iva, rule.TariffPercentage, value, justification)
 }
 
-// newCalculation builds a Calculation from a rule and its computed amounts —
-// TaxType and LegalBasis always come from the rule, identical across every
-// branch of CalculateWithMinimumBase/CalculateReteiva.
+// newCalculation builds a Calculation from a rule and its computed amounts.
 func newCalculation(rule entity.TaxRule, base, tariff, value decimal.Decimal, justification string) entity.Calculation {
 	return entity.Calculation{
 		TaxType:         rule.TaxType,
@@ -65,12 +58,29 @@ func newCalculation(rule entity.TaxRule, base, tariff, value decimal.Decimal, ju
 	}
 }
 
-// NotApplicable builds a zero-value, auditable Calculation for cases where
-// no TaxRule could even be looked up (missing concept classification,
-// missing city tariff, buyer not a withholding agent, no rule configured
-// for the date). There is no TaxRule to read TariffApplied/LegalBasis from,
-// so both are left at their zero value — the reason lives entirely in
-// Justification.
+// SummarizeByTaxType rolls up CalculatedValue across every line of an
+// invoice into one total per tax type.
+func SummarizeByTaxType(calculations []entity.Calculation) entity.CalculationSummary {
+	summary := entity.CalculationSummary{
+		TotalRetefuente: decimal.Zero,
+		TotalReteiva:    decimal.Zero,
+		TotalReteica:    decimal.Zero,
+	}
+	for _, c := range calculations {
+		switch c.TaxType {
+		case enums.TaxTypeRetefuente:
+			summary.TotalRetefuente = summary.TotalRetefuente.Add(c.CalculatedValue)
+		case enums.TaxTypeReteiva:
+			summary.TotalReteiva = summary.TotalReteiva.Add(c.CalculatedValue)
+		case enums.TaxTypeReteica:
+			summary.TotalReteica = summary.TotalReteica.Add(c.CalculatedValue)
+		}
+	}
+	return summary
+}
+
+// NotApplicable builds a zero-value Calculation for when no TaxRule could
+// be looked up; the reason lives entirely in Justification.
 func NotApplicable(taxType enums.TaxType, reason string) entity.Calculation {
 	return entity.Calculation{
 		TaxType:         taxType,

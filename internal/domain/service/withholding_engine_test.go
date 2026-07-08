@@ -115,3 +115,36 @@ func TestNotApplicable(t *testing.T) {
 		t.Errorf("TaxType = %s, want %s", got.TaxType, enums.TaxTypeReteica)
 	}
 }
+
+func TestSummarizeByTaxType(t *testing.T) {
+	t.Run("sums calculated values per tax type across multiple lines", func(t *testing.T) {
+		calcs := []entity.Calculation{
+			{TaxType: enums.TaxTypeRetefuente, CalculatedValue: dec("100")},
+			{TaxType: enums.TaxTypeReteiva, CalculatedValue: dec("50")},
+			{TaxType: enums.TaxTypeReteica, CalculatedValue: dec("10")},
+			{TaxType: enums.TaxTypeRetefuente, CalculatedValue: dec("200")},
+			{TaxType: enums.TaxTypeReteiva, CalculatedValue: dec("75")},
+			{TaxType: enums.TaxTypeReteica, CalculatedValue: dec("20")},
+		}
+
+		got := service.SummarizeByTaxType(calcs)
+
+		if !got.TotalRetefuente.Equal(dec("300")) {
+			t.Errorf("TotalRetefuente = %s, want 300", got.TotalRetefuente)
+		}
+		if !got.TotalReteiva.Equal(dec("125")) {
+			t.Errorf("TotalReteiva = %s, want 125", got.TotalReteiva)
+		}
+		if !got.TotalReteica.Equal(dec("30")) {
+			t.Errorf("TotalReteica = %s, want 30", got.TotalReteica)
+		}
+	})
+
+	t.Run("empty input yields a zero-value summary, not a nil/panic", func(t *testing.T) {
+		got := service.SummarizeByTaxType(nil)
+
+		if !got.TotalRetefuente.IsZero() || !got.TotalReteiva.IsZero() || !got.TotalReteica.IsZero() {
+			t.Errorf("expected all totals zero, got %+v", got)
+		}
+	})
+}

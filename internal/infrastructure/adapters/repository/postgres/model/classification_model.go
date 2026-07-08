@@ -2,12 +2,9 @@ package model
 
 import "time"
 
-// LineClassificationModel is a self-feeding LLM classification cache, not a
-// hand-curated keyword catalog. Lookup priority: (IssuerNIT, SKU) first
-// (stronger identity, same item from the same supplier), falling back to
-// DescriptionNormalized when no SKU is available. The composite uniqueIndex
-// on (issuer_nit, sku) naturally excludes rows where either is NULL, per
-// standard Postgres unique-index semantics — no partial index needed.
+// LineClassificationModel is an LLM classification cache. Lookup priority:
+// (IssuerNIT, SKU) first, falling back to DescriptionNormalized. The unique
+// index on (issuer_nit, sku) naturally excludes NULL rows in Postgres.
 type LineClassificationModel struct {
 	ID                    uint                    `gorm:"primaryKey"`
 	IssuerNIT             *string                 `gorm:"size:20;uniqueIndex:idx_issuer_sku"`

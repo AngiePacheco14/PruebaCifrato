@@ -39,14 +39,52 @@ var allTaxTypes = []enums.TaxType{
 	enums.TaxTypeReteica,
 }
 
-// Execute never fails because of a per-line business/data-quality edge case
-// (unclassified line, missing ICA city tariff, non-agent buyer, base below
-// minimum, no rule configured for the date) — each of those always produces
-// an auditable zero-value Calculation, persisted like any other. It DOES
-// return an error on genuine infrastructure failures (repository errors)
-// and on the missing-UVT precondition, since that means the environment is
-// misconfigured, not that this particular invoice/line has a business
-// reason to skip withholding.
+// conceptGroup aggregates every line of an invoice that shares a concept.
+// ConceptID nil is the "lines with no classified concept" bucket.
+type conceptGroup struct {
+	ConceptID *uint
+	LineTotal decimal.Decimal
+	IVAValue  decimal.Decimal
+}
+
+// groupLinesByConcept sums LineTotal and IVAValue per concept; nil-concept
+// lines form their own group. RETEFUENTE/RETEICA's minimum-base check is
+// per invoice, not per line.
+func groupLinesByConcept(lines []entity.InvoiceLine) []conceptGroup {
+	groups := make([]conceptGroup, 0, len(lines))
+
+	for i := range lines {
+		line := &lines[i]
+
+		var group *conceptGroup
+		for j := range groups {
+			if sameConcept(groups[j].ConceptID, line.ConceptID) {
+				group = &groups[j]
+				break
+			}
+		}
+		if group == nil {
+			groups = append(groups, conceptGroup{ConceptID: line.ConceptID, LineTotal: decimal.Zero, IVAValue: decimal.Zero})
+			group = &groups[len(groups)-1]
+		}
+		group.LineTotal = group.LineTotal.Add(line.LineTotal)
+		group.IVAValue = group.IVAValue.Add(line.IVAValue)
+	}
+
+	return groups
+}
+
+func sameConcept(a, b *uint) bool {
+	if a == nil || b == nil {
+		return a == nil && b == nil
+	}
+	return *a == *b
+}
+
+// Execute treats business/data-quality edge cases (unclassified lines,
+// missing ICA tariff, non-agent buyer, base below minimum, no rule for the
+// date) as zero-value Calculations, not errors. It only errors on
+// infrastructure failures and the missing-UVT precondition.
 func (uc *CalculateWithholdings) Execute(ctx context.Context, inv *entity.Invoice) ([]entity.Calculation, error) {
 	if inv.ID == 0 {
 		return nil, fmt.Errorf("usecase: invoice must be persisted (ID=0) before calculating withholdings")
@@ -60,9 +98,7 @@ func (uc *CalculateWithholdings) Execute(ctx context.Context, inv *entity.Invoic
 		return nil, fmt.Errorf("usecase: no UVT value configured for %s", inv.IssueDate.Format("2006-01-02"))
 	}
 
-	// Resolved once per invoice, not per line: RETEICA always keys off the
-	// issuer/seller city (business decision — RETEICA looks at where the
-	// seller operates, not the buyer), and IssuerCity is invoice-level.
+	// RETEICA keys off the issuer/seller city, resolved once per invoice.
 	icaCity, err := uc.referenceData.FindCityByName(ctx, inv.IssuerCity)
 	if err != nil {
 		return nil, fmt.Errorf("usecase: finding city %q: %w", inv.IssuerCity, err)
@@ -70,42 +106,40 @@ func (uc *CalculateWithholdings) Execute(ctx context.Context, inv *entity.Invoic
 
 	var results []entity.Calculation
 
-	for i := range inv.Lines {
-		line := &inv.Lines[i]
-
-		if line.ConceptID == nil {
+	for _, group := range groupLinesByConcept(inv.Lines) {
+		if group.ConceptID == nil {
 			for _, tt := range allTaxTypes {
-				calc := service.NotApplicable(tt, "línea sin concepto clasificado, no se puede determinar la regla aplicable")
-				if err := uc.persist(ctx, inv, line, nil, calc, &results); err != nil {
+				calc := service.NotApplicable(tt, "línea(s) sin concepto clasificado, no se puede determinar la regla aplicable")
+				if err := uc.persist(ctx, inv, nil, calc, &results); err != nil {
 					return results, err
 				}
 			}
 			continue
 		}
-		conceptID := *line.ConceptID
+		conceptID := *group.ConceptID
 
-		refuenteCalc, err := uc.calculateMinimumBaseTax(ctx, enums.TaxTypeRetefuente, conceptID, nil, inv.IssueDate, uvt.Value, line.LineTotal,
+		refuenteCalc, err := uc.calculateMinimumBaseTax(ctx, enums.TaxTypeRetefuente, conceptID, nil, inv.IssueDate, uvt.Value, group.LineTotal,
 			"sin regla RETEFUENTE configurada para este concepto vigente a la fecha de la factura")
 		if err != nil {
 			return results, err
 		}
-		if err := uc.persist(ctx, inv, line, line.ConceptID, refuenteCalc, &results); err != nil {
+		if err := uc.persist(ctx, inv, group.ConceptID, refuenteCalc, &results); err != nil {
 			return results, err
 		}
 
-		reteivaCalc, err := uc.calculateReteiva(ctx, conceptID, inv.IssueDate, line.IVAValue)
+		reteivaCalc, err := uc.calculateReteiva(ctx, conceptID, inv.IssueDate, group.IVAValue)
 		if err != nil {
 			return results, err
 		}
-		if err := uc.persist(ctx, inv, line, line.ConceptID, reteivaCalc, &results); err != nil {
+		if err := uc.persist(ctx, inv, group.ConceptID, reteivaCalc, &results); err != nil {
 			return results, err
 		}
 
-		reteicaCalc, err := uc.calculateReteica(ctx, conceptID, icaCity, inv.IssuerCity, inv.IssueDate, uvt.Value, line.LineTotal)
+		reteicaCalc, err := uc.calculateReteica(ctx, conceptID, icaCity, inv.IssuerCity, inv.IssueDate, uvt.Value, group.LineTotal)
 		if err != nil {
 			return results, err
 		}
-		if err := uc.persist(ctx, inv, line, line.ConceptID, reteicaCalc, &results); err != nil {
+		if err := uc.persist(ctx, inv, group.ConceptID, reteicaCalc, &results); err != nil {
 			return results, err
 		}
 	}
@@ -155,12 +189,11 @@ func (uc *CalculateWithholdings) calculateReteica(ctx context.Context, conceptID
 		fmt.Sprintf("sin tarifa RETEICA configurada para la ciudad %s y este concepto vigente a la fecha de la factura", issuerCityName))
 }
 
-func (uc *CalculateWithholdings) persist(ctx context.Context, inv *entity.Invoice, line *entity.InvoiceLine, conceptID *uint, calc entity.Calculation, results *[]entity.Calculation) error {
-	calc.InvoiceLineID = line.ID
+func (uc *CalculateWithholdings) persist(ctx context.Context, inv *entity.Invoice, conceptID *uint, calc entity.Calculation, results *[]entity.Calculation) error {
 	calc.InvoiceID = inv.ID
 	calc.ConceptID = conceptID
 	if err := uc.calculations.Upsert(ctx, &calc); err != nil {
-		return fmt.Errorf("usecase: persisting %s calculation for line %d: %w", calc.TaxType, line.ID, err)
+		return fmt.Errorf("usecase: persisting %s calculation for invoice %d: %w", calc.TaxType, inv.ID, err)
 	}
 	*results = append(*results, calc)
 	return nil

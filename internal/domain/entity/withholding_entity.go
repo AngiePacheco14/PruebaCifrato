@@ -30,9 +30,8 @@ type UVTValue struct {
 	ResolutionReference string
 }
 
-// TaxRule is a single row of the additional_taxes_rules table: one tariff
-// for one concept, valid in a date range. CityID nil means a national rule
-// (RETEFUENTE/RETEIVA); a value means a territorial ICA rule for that city.
+// TaxRule is one tariff for one concept, valid in a date range. CityID nil
+// means a national rule; a value means a territorial ICA rule for that city.
 type TaxRule struct {
 	ID               uint
 	TaxType          enums.TaxType
@@ -45,14 +44,12 @@ type TaxRule struct {
 	EffectiveTo      *time.Time
 }
 
-// Calculation is the engine's output for one invoice line and one tax type.
-// ConceptID is nil when the line had no classified concept — same shape as
-// InvoiceLine.ConceptID. How a persistence adapter represents "no concept"
-// in its own schema (NULL, a sentinel, etc.) is that adapter's concern, not
-// the domain's.
+// Calculation is the engine's output for one invoice, one classified
+// concept, and one tax type. BaseAmount is aggregated across every line of
+// that concept, since the minimum-base threshold is checked per invoice, not
+// per line. ConceptID is nil for lines with no classified concept.
 type Calculation struct {
 	ID              uint
-	InvoiceLineID   uint
 	InvoiceID       uint
 	TaxType         enums.TaxType
 	ConceptID       *uint
@@ -61,4 +58,12 @@ type Calculation struct {
 	CalculatedValue decimal.Decimal
 	LegalBasis      string
 	Justification   string
+}
+
+// CalculationSummary aggregates CalculatedValue across an invoice, one
+// total per tax type.
+type CalculationSummary struct {
+	TotalRetefuente decimal.Decimal
+	TotalReteiva    decimal.Decimal
+	TotalReteica    decimal.Decimal
 }

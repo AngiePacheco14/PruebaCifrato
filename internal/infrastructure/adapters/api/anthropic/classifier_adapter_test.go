@@ -11,9 +11,8 @@ import (
 	"cifrato/internal/infrastructure/adapters/api/anthropic"
 )
 
-// TestClassifier_Classify_RealAPI hits the real Anthropic API. It's skipped
-// unless ANTHROPIC_API_KEY is set, same pattern as the DB_HOST skip used for
-// Postgres integration tests (see postgres/invoice_repository_impl_test.go).
+// TestClassifier_Classify_RealAPI hits the real Anthropic API; skipped
+// unless ANTHROPIC_API_KEY is set.
 func TestClassifier_Classify_RealAPI(t *testing.T) {
 	if os.Getenv("ANTHROPIC_API_KEY") == "" {
 		t.Skip("ANTHROPIC_API_KEY not set, skipping integration test against the real Anthropic API")
@@ -31,7 +30,6 @@ func TestClassifier_Classify_RealAPI(t *testing.T) {
 		t.Fatalf("NewClassifier() error = %v", err)
 	}
 
-	// Real descriptions taken from sample-invoices/, one per concept.
 	cases := []struct {
 		name          string
 		description   string

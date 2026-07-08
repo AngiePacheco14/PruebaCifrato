@@ -79,7 +79,7 @@ func mapInvoice(xi *xmlInvoice, xmlType enums.XMLType) (*entity.Invoice, error) 
 }
 
 // isIVAScheme matches TaxScheme/ID="01", falling back to a case-insensitive
-// Name match when the ID isn't the standard "01" (confirmed in real data).
+// Name match otherwise.
 func isIVAScheme(ts xmlTaxScheme) bool {
 	if strings.TrimSpace(ts.ID) == "01" {
 		return true
@@ -95,14 +95,9 @@ type ivaSubtotalKey struct {
 	amount     string
 }
 
-// sumIVA iterates every header TaxTotal block, keeps only IVA subtotals, and
-// deduplicates entries that are byte-identical across (scheme ID, scheme
-// name, percent, amount) before summing. This was confirmed necessary
-// against real DIAN data: one sample invoice emits the exact same IVA
-// TaxSubtotal twice in the source XML, which without dedup would double the
-// IVA total and break Subtotal + IVA = InvoiceTotal. Legitimate distinct
-// amounts (e.g. multiple different tax types in separate TaxTotal blocks)
-// never collide with this key.
+// sumIVA sums IVA TaxSubtotal entries across all header TaxTotal blocks,
+// deduping by (scheme ID, name, percent, amount) — some invoices repeat the
+// same block verbatim.
 func sumIVA(taxTotals []xmlTaxTotal) decimal.Decimal {
 	seen := make(map[ivaSubtotalKey]bool)
 	total := decimal.Zero
@@ -128,10 +123,8 @@ func sumIVA(taxTotals []xmlTaxTotal) decimal.Decimal {
 }
 
 // classifyWithholdingName maps a TaxScheme/Name to one of the three tracked
-// withholding types using flexible, case-insensitive substring matching (the
-// TaxScheme/ID for withholdings is not a reliable standard code in practice).
-// Returns "" when the name doesn't match any known category (e.g. empty, or
-// the counterparty's own trade name echoed as Name — a confirmed real case).
+// withholding types via case-insensitive substring matching (TaxScheme/ID is
+// not a reliable code for withholdings). Returns "" when nothing matches.
 func classifyWithholdingName(name string) string {
 	n := strings.ToLower(strings.TrimSpace(name))
 	switch {
@@ -146,14 +139,9 @@ func classifyWithholdingName(name string) string {
 	}
 }
 
-// extractWithholding iterates every WithholdingTaxTotal block. Within each
-// block it scans all TaxSubtotal children (a single block can carry more
-// than one) and uses the first one whose Name matches a known category to
-// classify the block; the amount assigned is the block-level TaxAmount, per
-// spec. Blocks where nothing matches are ignored entirely (informational
-// only). If the same category appears in more than one block, the last
-// matching block wins, consistent with the "latest wins" pattern already
-// used for withholding_calculations.
+// extractWithholding classifies each WithholdingTaxTotal block by its first
+// matching TaxSubtotal Name, using the block-level TaxAmount. Unmatched
+// blocks are ignored; if a category repeats, the last block wins.
 func extractWithholding(blocks []xmlWithholdingTaxTotal) (retefuente, reteiva, reteica *decimal.Decimal) {
 	for _, wht := range blocks {
 		category := ""
@@ -179,9 +167,8 @@ func extractWithholding(blocks []xmlWithholdingTaxTotal) (retefuente, reteiva, r
 	return retefuente, reteiva, reteica
 }
 
-// findIVASubtotal returns the rate and value of the first TaxSubtotal across
-// all of a line's TaxTotal blocks that matches the IVA scheme, or zero
-// values if none do (confirmed absent entirely on some real invoices).
+// findIVASubtotal returns the rate and value of the first IVA TaxSubtotal
+// across a line's TaxTotal blocks, or zero if none match.
 func findIVASubtotal(taxTotals []xmlTaxTotal) (rate, value decimal.Decimal) {
 	for _, tt := range taxTotals {
 		for _, ts := range tt.TaxSubtotal {

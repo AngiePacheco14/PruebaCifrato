@@ -6,12 +6,11 @@ import (
 
 	"cifrato/internal/application/ports/in"
 	"cifrato/internal/domain/repository"
+	"cifrato/internal/domain/service"
 )
 
-// ProcessInvoice orchestrates the full pipeline for one invoice XML: parse,
-// persist, classify lines, and calculate withholdings. It is the composition
-// root's single entry point for a driving adapter (HTTP handler, CLI
-// command, etc.) — none of them need to know the individual steps exist.
+// ProcessInvoice runs the full pipeline for one invoice XML: parse,
+// persist, classify lines, calculate withholdings.
 type ProcessInvoice struct {
 	parser                repository.InvoiceParser
 	invoices              repository.InvoiceRepository
@@ -43,11 +42,7 @@ func (uc *ProcessInvoice) Execute(ctx context.Context, xmlData []byte, sourceXML
 	inv.SourceXMLPath = sourceXMLPath
 	inv.SourcePDFPath = sourcePDFPath
 
-	// Classify before saving: classification only sets in-memory fields
-	// (ConceptID/ClassificationConfidence), it needs no DB-assigned IDs.
-	// Saving afterward means invoice_lines.concept_id is persisted correctly
-	// on the first (and only) write, instead of staying NULL forever because
-	// a later in-memory-only mutation was never written back.
+	// Classify before saving so concept_id is persisted on the first write.
 	if err := uc.classifyLines.Execute(ctx, inv); err != nil {
 		return nil, fmt.Errorf("usecase: classifying lines for invoice %s: %w", inv.CUFE, err)
 	}
@@ -61,5 +56,7 @@ func (uc *ProcessInvoice) Execute(ctx context.Context, xmlData []byte, sourceXML
 		return nil, fmt.Errorf("usecase: calculating withholdings for invoice %s: %w", inv.CUFE, err)
 	}
 
-	return &in.ProcessInvoiceResult{Invoice: inv, Calculations: calculations}, nil
+	summary := service.SummarizeByTaxType(calculations)
+
+	return &in.ProcessInvoiceResult{Invoice: inv, Calculations: calculations, Summary: summary}, nil
 }

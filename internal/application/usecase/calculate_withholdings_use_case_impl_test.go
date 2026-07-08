@@ -244,13 +244,104 @@ func TestCalculateWithholdings_Execute(t *testing.T) {
 			if c.ConceptID != nil {
 				t.Errorf("%s ConceptID = %v, want nil", c.TaxType, c.ConceptID)
 			}
-			want := "línea sin concepto clasificado, no se puede determinar la regla aplicable"
+			want := "línea(s) sin concepto clasificado, no se puede determinar la regla aplicable"
 			if c.Justification != want {
 				t.Errorf("%s Justification = %q, want %q", c.TaxType, c.Justification, want)
 			}
 		}
 		if len(calcs.saved) != 3 {
 			t.Errorf("len(calcs.saved) = %d, want 3", len(calcs.saved))
+		}
+	})
+
+	t.Run("varias lineas del mismo concepto se suman antes de evaluar el minimo", func(t *testing.T) {
+		// Two lines individually below the minimum, but summed together they clear it.
+		taxRules := &fakeTaxRuleRepo{rules: []entity.TaxRule{baseRetefuenteRule()}}
+		calcs := &fakeCalculationRepo{}
+		uc := usecase.NewCalculateWithholdings(taxRules, calcs, &fakeReferenceData{uvt: uvt}, appconfig.Config{})
+
+		conceptID := compraBienesConceptID
+		inv := baseInvoice()
+		inv.Lines = []entity.InvoiceLine{
+			{ID: 1, LineTotal: decimal.RequireFromString("300000"), IVAValue: decimal.Zero, ConceptID: &conceptID},
+			{ID: 2, LineTotal: decimal.RequireFromString("300000"), IVAValue: decimal.Zero, ConceptID: &conceptID},
+		}
+
+		results, err := uc.Execute(context.Background(), inv)
+		if err != nil {
+			t.Fatalf("Execute() error = %v", err)
+		}
+
+		refuenteCalcs := 0
+		for _, c := range results {
+			if c.TaxType == enums.TaxTypeRetefuente {
+				refuenteCalcs++
+				want := decimal.RequireFromString("15000") // 600,000 * 2.5%
+				if !c.CalculatedValue.Equal(want) {
+					t.Errorf("CalculatedValue = %s, want %s (combined base, not per-line)", c.CalculatedValue, want)
+				}
+				if !c.BaseAmount.Equal(decimal.RequireFromString("600000")) {
+					t.Errorf("BaseAmount = %s, want 600000 (sum of both lines)", c.BaseAmount)
+				}
+			}
+		}
+		if refuenteCalcs != 1 {
+			t.Errorf("got %d RETEFUENTE calculations, want exactly 1 (one per concept, not one per line)", refuenteCalcs)
+		}
+	})
+
+	t.Run("lineas de conceptos distintos producen grupos separados, no se mezclan", func(t *testing.T) {
+		servicioConceptID := uint(2)
+		taxRules := &fakeTaxRuleRepo{rules: []entity.TaxRule{
+			baseRetefuenteRule(), // compra_bienes: 2.5%, min 10 UVT
+			{
+				TaxType: enums.TaxTypeRetefuente, ConceptID: servicioConceptID,
+				MinBaseUVT: decimal.RequireFromString("2"), TariffPercentage: decimal.RequireFromString("4"),
+				LegalBasis: "Art. 392 E.T.", EffectiveFrom: time.Date(2025, 1, 1, 0, 0, 0, 0, time.UTC),
+			},
+		}}
+		calcs := &fakeCalculationRepo{}
+		uc := usecase.NewCalculateWithholdings(taxRules, calcs, &fakeReferenceData{uvt: uvt}, appconfig.Config{})
+
+		bienesConceptID := compraBienesConceptID
+		inv := baseInvoice()
+		inv.Lines = []entity.InvoiceLine{
+			{ID: 1, LineTotal: decimal.RequireFromString("10000000"), IVAValue: decimal.Zero, ConceptID: &bienesConceptID},
+			{ID: 2, LineTotal: decimal.RequireFromString("1000000"), IVAValue: decimal.Zero, ConceptID: &servicioConceptID},
+		}
+
+		results, err := uc.Execute(context.Background(), inv)
+		if err != nil {
+			t.Fatalf("Execute() error = %v", err)
+		}
+
+		var refuenteResults []entity.Calculation
+		for _, c := range results {
+			if c.TaxType == enums.TaxTypeRetefuente {
+				refuenteResults = append(refuenteResults, c)
+			}
+		}
+		if len(refuenteResults) != 2 {
+			t.Fatalf("got %d RETEFUENTE calculations, want 2 (one per concept)", len(refuenteResults))
+		}
+		for _, c := range refuenteResults {
+			if c.ConceptID == nil {
+				t.Fatal("ConceptID = nil, want it set on a classified group")
+			}
+			switch *c.ConceptID {
+			case bienesConceptID:
+				want := decimal.RequireFromString("250000") // 10,000,000 * 2.5%
+				if !c.CalculatedValue.Equal(want) {
+					t.Errorf("compra_bienes CalculatedValue = %s, want %s", c.CalculatedValue, want)
+				}
+			case servicioConceptID:
+				want := decimal.RequireFromString("40000") // 1,000,000 * 4%
+				if !c.CalculatedValue.Equal(want) {
+					t.Errorf("servicios_generales CalculatedValue = %s, want %s", c.CalculatedValue, want)
+				}
+			default:
+				t.Errorf("unexpected ConceptID %d", *c.ConceptID)
+			}
 		}
 	})
 

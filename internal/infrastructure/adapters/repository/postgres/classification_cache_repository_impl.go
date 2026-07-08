@@ -41,13 +41,9 @@ func (r *ClassificationCacheRepository) FindByDescription(ctx context.Context, d
 	return mappers.ClassificationEntryToDomain(found), nil
 }
 
-// Save upserts on (issuer_nit, sku) instead of a plain Create: two
-// concurrent classifications that both miss the cache for the same
-// (issuer, sku) would otherwise race to insert and the second would
-// violate line_classifications' unique index. Postgres excludes rows with
-// a NULL issuer_nit/sku from that unique index, so entries without a SKU
-// (identity by description_normalized only) are unaffected by this
-// clause — they always insert as a new row.
+// Save upserts on (issuer_nit, sku) to avoid a unique-index violation when
+// two concurrent lookups miss the cache for the same key. Rows with a NULL
+// issuer_nit/sku are excluded from that index and always insert as new.
 func (r *ClassificationCacheRepository) Save(ctx context.Context, entry *entity.ClassificationCacheEntry) error {
 	row := mappers.ClassificationEntryToModel(entry)
 	err := r.db.WithContext(ctx).Clauses(clause.OnConflict{

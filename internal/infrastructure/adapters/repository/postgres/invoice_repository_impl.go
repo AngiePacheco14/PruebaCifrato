@@ -22,11 +22,9 @@ var _ repository.InvoiceRepository = (*InvoiceRepository)(nil)
 func (r *InvoiceRepository) Save(ctx context.Context, inv *entity.Invoice) error {
 	row := mappers.InvoiceToModel(inv)
 	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		// Omit(clause.Associations) is required here: GORM's Create otherwise
-		// auto-saves the Lines association as a side effect, using its own
-		// default ON CONFLICT ("id") — which knows nothing about the
-		// (invoice_id, line_number) natural key below and collides with it on
-		// every re-import. Lines are persisted explicitly, right after this.
+		// Omit(clause.Associations) prevents GORM from auto-saving Lines with its
+		// own ON CONFLICT("id"), which would collide with the natural-key upsert
+		// below. Lines are persisted explicitly right after this.
 		if err := tx.Omit(clause.Associations).Clauses(clause.OnConflict{
 			Columns: []clause.Column{{Name: "cufe"}},
 			DoUpdates: clause.AssignmentColumns([]string{
@@ -42,13 +40,9 @@ func (r *InvoiceRepository) Save(ctx context.Context, inv *entity.Invoice) error
 			row.Lines[i].InvoiceID = row.ID
 		}
 
-		// Upsert lines by (invoice_id, line_number) instead of deleting and
-		// reinserting: that would hand every re-imported line a fresh
-		// auto-generated ID, breaking withholding_calculations' own upsert
-		// (keyed on invoice_line_id) — recalculating the same invoice would
-		// accumulate orphaned calculation rows instead of overwriting them,
-		// since the line ID they pointed at no longer existed. Keeping the
-		// same natural key across re-imports keeps the line's ID stable.
+		// Upsert by (invoice_id, line_number) instead of delete+reinsert, so line
+		// IDs stay stable across re-imports — withholding_calculations references
+		// them by invoice_line_id.
 		if len(row.Lines) > 0 {
 			if err := tx.Clauses(clause.OnConflict{
 				Columns: []clause.Column{{Name: "invoice_id"}, {Name: "line_number"}},

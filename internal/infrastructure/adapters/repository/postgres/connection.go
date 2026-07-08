@@ -18,10 +18,8 @@ type Config struct {
 	Password string
 	DBName   string
 	SSLMode  string
-	// RunMigrations gates OpenAndMigrate's automatic migration-on-connect —
-	// matching bia-electronic-bills' RUN_MIGRATIONS toggle. Defaults to true:
-	// Cifrato runs as a single instance for this technical test, so there's
-	// no multi-replica race to worry about.
+	// RunMigrations gates OpenAndMigrate's automatic migration-on-connect.
+	// Defaults to true; safe since Cifrato runs as a single instance.
 	RunMigrations bool
 }
 
