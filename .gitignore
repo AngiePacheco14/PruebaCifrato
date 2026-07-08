@@ -15,6 +15,10 @@ sample-invoices/
 *.exe
 *.test
 
+# Docs other than the main README (e.g. the test's own context file)
+*.md
+!README.md
+
 # OS
 .DS_Store
 Thumbs.db

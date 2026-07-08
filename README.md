@@ -5,9 +5,6 @@ automáticamente las retenciones que aplican — **ReteFuente**, **ReteIVA** y *
 devolviendo para cada una la base gravable, la tarifa aplicada, el valor y la norma legal
 que la sustenta.
 
-Prueba técnica para Cifrato. Contexto completo del enunciado en
-[`contexto-prueba-cifrato.md`](contexto-prueba-cifrato.md).
-
 ## Enfoque
 
 El cálculo se divide en dos responsabilidades bien separadas:
