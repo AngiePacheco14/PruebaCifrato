@@ -49,6 +49,19 @@ internal/
 - **shopspring/decimal** para todos los montos — nunca `float`, para evitar errores de
   redondeo en cifras fiscales.
 
+## Decisiones de diseño
+
+- **Tarifas versionadas por fecha de vigencia, no hardcodeadas**: la tabla
+  `additional_taxes_rules` tiene `effective_from`/`effective_to`, y el motor busca la regla
+  vigente a la fecha de emisión de cada factura. Las bases de ReteFuente cambiaron varias
+  veces en 2026 — cargar una nueva vigencia es una fila nueva, no un despliegue de código. Lo
+  mismo aplica a la UVT.
+- **Sin cola de revisión humana para clasificaciones de baja confianza**: decisión deliberada.
+  El caso de uso de Cifrato es procesar muchas facturas de forma directa, y una cola manual no
+  escala con ese volumen. En su lugar, cada clasificación queda con su `confidence` guardado
+  para auditar después, y una línea sin concepto claro simplemente no genera retención (con su
+  propia justificación) en vez de bloquear la factura completa.
+
 ## Cómo correrlo
 
 Requisitos: Go 1.26+, Docker (para Postgres), y opcionalmente una API key de Anthropic
@@ -163,9 +176,10 @@ reporta su propio éxito o error en la respuesta.
 go test ./...
 ```
 
-Cubren el motor de cálculo puro, el parseo de las facturas de muestra reales, los casos de
-uso con fakes en memoria, y (si hay Postgres/API key disponibles) la persistencia y la
-clasificación real contra Claude.
+Cubren el motor de cálculo puro, el parseo de las 10 facturas de muestra reales, los casos de
+uso (con mocks generados por [mockery](https://vektra.github.io/mockery/) sobre las interfaces
+de dominio), y — si hay Postgres/API key disponibles — la persistencia y la clasificación real
+contra Claude.
 
 `sample-invoices/` no se versiona en git (son datos reales de facturación de empresas
 colombianas) — se agrega localmente para correr las pruebas contra facturas reales.

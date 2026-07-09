@@ -5,70 +5,18 @@ import (
 	"errors"
 	"testing"
 
+	"github.com/stretchr/testify/mock"
+
 	"cifrato/internal/application/usecase"
 	"cifrato/internal/domain/entity"
+	"cifrato/internal/domain/repository/mocks"
 )
 
-type fakeLineClassifier struct {
-	calls  int
-	result *entity.LineClassification
-	err    error
-}
-
-func (f *fakeLineClassifier) Classify(context.Context, string) (*entity.LineClassification, error) {
-	f.calls++
-	if f.err != nil {
-		return nil, f.err
-	}
-	return f.result, nil
-}
-
-type fakeClassificationCache struct {
-	byIssuerSKU map[string]entity.ClassificationCacheEntry
-	byDesc      map[string]entity.ClassificationCacheEntry
-	saved       []entity.ClassificationCacheEntry
-	findErr     error
-	saveErr     error
-}
-
-func newFakeCache() *fakeClassificationCache {
-	return &fakeClassificationCache{
-		byIssuerSKU: map[string]entity.ClassificationCacheEntry{},
-		byDesc:      map[string]entity.ClassificationCacheEntry{},
-	}
-}
-
-func (f *fakeClassificationCache) FindByIssuerAndSKU(_ context.Context, issuerNIT, sku string) (*entity.ClassificationCacheEntry, error) {
-	if f.findErr != nil {
-		return nil, f.findErr
-	}
-	e, ok := f.byIssuerSKU[issuerNIT+"|"+sku]
-	if !ok {
-		return nil, nil
-	}
-	ec := e
-	return &ec, nil
-}
-
-func (f *fakeClassificationCache) FindByDescription(_ context.Context, desc string) (*entity.ClassificationCacheEntry, error) {
-	if f.findErr != nil {
-		return nil, f.findErr
-	}
-	e, ok := f.byDesc[desc]
-	if !ok {
-		return nil, nil
-	}
-	ec := e
-	return &ec, nil
-}
-
-func (f *fakeClassificationCache) Save(_ context.Context, entry *entity.ClassificationCacheEntry) error {
-	if f.saveErr != nil {
-		return f.saveErr
-	}
-	entry.ID = uint(len(f.saved) + 1)
-	f.saved = append(f.saved, *entry)
-	return nil
+// mockCacheMiss stubs both cache lookups to miss — the common setup for
+// subtests where the point is what happens after the cache misses.
+func mockCacheMiss(cache *mocks.MockClassificationCacheRepository) {
+	cache.EXPECT().FindByIssuerAndSKU(mock.Anything, "900290912", "PTT199").Return(nil, nil)
+	cache.EXPECT().FindByDescription(mock.Anything, "mantequilla perfumada 240 ml").Return(nil, nil)
 }
 
 func baseClassifyInvoice() *entity.Invoice {
@@ -88,27 +36,27 @@ func baseClassifyInvoice() *entity.Invoice {
 
 func TestClassifyInvoiceLines_Execute(t *testing.T) {
 	t.Run("linea con hit por issuer_nit+sku no llama al LLM", func(t *testing.T) {
-		cache := newFakeCache()
-		cache.byIssuerSKU["900290912|PTT199"] = entity.ClassificationCacheEntry{ConceptID: 1, Confidence: 0.95}
-		classifier := &fakeLineClassifier{}
+		cache := mocks.NewMockClassificationCacheRepository(t)
+		cache.EXPECT().FindByIssuerAndSKU(mock.Anything, "900290912", "PTT199").
+			Return(&entity.ClassificationCacheEntry{ConceptID: 1, Confidence: 0.95}, nil)
+		classifier := mocks.NewMockLineClassifier(t)
 		uc := usecase.NewClassifyInvoiceLines(cache, classifier)
 
 		inv := baseClassifyInvoice()
 		if err := uc.Execute(context.Background(), inv); err != nil {
 			t.Fatalf("Execute() error = %v", err)
 		}
-		if classifier.calls != 0 {
-			t.Errorf("classifier.calls = %d, want 0", classifier.calls)
-		}
+		classifier.AssertNotCalled(t, "Classify", mock.Anything, mock.Anything)
 		if inv.Lines[0].ConceptID == nil || *inv.Lines[0].ConceptID != 1 {
 			t.Errorf("ConceptID = %v, want 1", inv.Lines[0].ConceptID)
 		}
 	})
 
 	t.Run("linea con hit por descripcion no llama al LLM", func(t *testing.T) {
-		cache := newFakeCache()
-		cache.byDesc["mantequilla perfumada 240 ml"] = entity.ClassificationCacheEntry{ConceptID: 1, Confidence: 0.9}
-		classifier := &fakeLineClassifier{}
+		cache := mocks.NewMockClassificationCacheRepository(t)
+		cache.EXPECT().FindByDescription(mock.Anything, "mantequilla perfumada 240 ml").
+			Return(&entity.ClassificationCacheEntry{ConceptID: 1, Confidence: 0.9}, nil)
+		classifier := mocks.NewMockLineClassifier(t)
 		uc := usecase.NewClassifyInvoiceLines(cache, classifier)
 
 		inv := baseClassifyInvoice()
@@ -117,33 +65,38 @@ func TestClassifyInvoiceLines_Execute(t *testing.T) {
 		if err := uc.Execute(context.Background(), inv); err != nil {
 			t.Fatalf("Execute() error = %v", err)
 		}
-		if classifier.calls != 0 {
-			t.Errorf("classifier.calls = %d, want 0", classifier.calls)
-		}
+		classifier.AssertNotCalled(t, "Classify", mock.Anything, mock.Anything)
 		if inv.Lines[0].ConceptID == nil || *inv.Lines[0].ConceptID != 1 {
 			t.Errorf("ConceptID = %v, want 1", inv.Lines[0].ConceptID)
 		}
 	})
 
 	t.Run("linea sin hit llama al LLM y guarda en cache", func(t *testing.T) {
-		cache := newFakeCache()
-		classifier := &fakeLineClassifier{result: &entity.LineClassification{
+		cache := mocks.NewMockClassificationCacheRepository(t)
+		mockCacheMiss(cache)
+		var saved *entity.ClassificationCacheEntry
+		cache.EXPECT().Save(mock.Anything, mock.Anything).Run(func(_ context.Context, entry *entity.ClassificationCacheEntry) {
+			saved = entry
+		}).Return(nil)
+
+		classifier := mocks.NewMockLineClassifier(t)
+		// Exact (non-normalized) description: the classifier must receive the
+		// raw text, not the cache's normalized key.
+		classifier.EXPECT().Classify(mock.Anything, "MANTEQUILLA PERFUMADA 240 ML").Return(&entity.LineClassification{
 			ConceptID: 1, ConceptCode: "compra_bienes", Confidence: 0.8, ModelVersion: "claude-haiku-4-5",
-		}}
+		}, nil).Once()
+
 		uc := usecase.NewClassifyInvoiceLines(cache, classifier)
 
 		inv := baseClassifyInvoice()
 		if err := uc.Execute(context.Background(), inv); err != nil {
 			t.Fatalf("Execute() error = %v", err)
 		}
-		if classifier.calls != 1 {
-			t.Errorf("classifier.calls = %d, want 1", classifier.calls)
+		if saved == nil {
+			t.Fatal("expected a classification to be saved to cache")
 		}
-		if len(cache.saved) != 1 {
-			t.Fatalf("len(cache.saved) = %d, want 1", len(cache.saved))
-		}
-		if cache.saved[0].DescriptionNormalized != "mantequilla perfumada 240 ml" {
-			t.Errorf("DescriptionNormalized = %q, want normalized description", cache.saved[0].DescriptionNormalized)
+		if saved.DescriptionNormalized != "mantequilla perfumada 240 ml" {
+			t.Errorf("DescriptionNormalized = %q, want normalized description", saved.DescriptionNormalized)
 		}
 		if inv.Lines[0].ConceptID == nil || *inv.Lines[0].ConceptID != 1 {
 			t.Errorf("ConceptID = %v, want 1", inv.Lines[0].ConceptID)
@@ -154,18 +107,25 @@ func TestClassifyInvoiceLines_Execute(t *testing.T) {
 	})
 
 	t.Run("clasificacion nueva con SKU guarda la entrada con issuer_nit y sku", func(t *testing.T) {
-		cache := newFakeCache()
-		classifier := &fakeLineClassifier{result: &entity.LineClassification{ConceptID: 1, Confidence: 0.8}}
+		cache := mocks.NewMockClassificationCacheRepository(t)
+		mockCacheMiss(cache)
+		var saved *entity.ClassificationCacheEntry
+		cache.EXPECT().Save(mock.Anything, mock.Anything).Run(func(_ context.Context, entry *entity.ClassificationCacheEntry) {
+			saved = entry
+		}).Return(nil)
+
+		classifier := mocks.NewMockLineClassifier(t)
+		classifier.EXPECT().Classify(mock.Anything, "MANTEQUILLA PERFUMADA 240 ML").Return(&entity.LineClassification{ConceptID: 1, Confidence: 0.8}, nil).Once()
+
 		uc := usecase.NewClassifyInvoiceLines(cache, classifier)
 
 		inv := baseClassifyInvoice()
 		if err := uc.Execute(context.Background(), inv); err != nil {
 			t.Fatalf("Execute() error = %v", err)
 		}
-		if len(cache.saved) != 1 {
-			t.Fatalf("len(cache.saved) = %d, want 1", len(cache.saved))
+		if saved == nil {
+			t.Fatal("expected a classification to be saved to cache")
 		}
-		saved := cache.saved[0]
 		if saved.IssuerNIT == nil || *saved.IssuerNIT != "900290912" {
 			t.Errorf("IssuerNIT = %v, want 900290912", saved.IssuerNIT)
 		}
@@ -175,8 +135,12 @@ func TestClassifyInvoiceLines_Execute(t *testing.T) {
 	})
 
 	t.Run("error del LLM deja la linea sin concepto y no falla la factura", func(t *testing.T) {
-		cache := newFakeCache()
-		classifier := &fakeLineClassifier{err: errors.New("connection refused")}
+		cache := mocks.NewMockClassificationCacheRepository(t)
+		mockCacheMiss(cache)
+
+		classifier := mocks.NewMockLineClassifier(t)
+		classifier.EXPECT().Classify(mock.Anything, mock.Anything).Return(nil, errors.New("connection refused"))
+
 		uc := usecase.NewClassifyInvoiceLines(cache, classifier)
 
 		inv := baseClassifyInvoice()
@@ -186,26 +150,30 @@ func TestClassifyInvoiceLines_Execute(t *testing.T) {
 		if inv.Lines[0].ConceptID != nil {
 			t.Errorf("ConceptID = %v, want nil", inv.Lines[0].ConceptID)
 		}
-		if len(cache.saved) != 0 {
-			t.Errorf("len(cache.saved) = %d, want 0 (a failed classification must not be cached)", len(cache.saved))
-		}
+		cache.AssertNotCalled(t, "Save", mock.Anything, mock.Anything)
 	})
 
 	t.Run("error del repositorio de cache propaga error", func(t *testing.T) {
-		cache := newFakeCache()
-		cache.findErr = errors.New("db connection lost")
-		classifier := &fakeLineClassifier{}
+		cache := mocks.NewMockClassificationCacheRepository(t)
+		cache.EXPECT().FindByIssuerAndSKU(mock.Anything, "900290912", "PTT199").Return(nil, errors.New("db connection lost"))
+		classifier := mocks.NewMockLineClassifier(t)
 		uc := usecase.NewClassifyInvoiceLines(cache, classifier)
 
 		inv := baseClassifyInvoice()
 		if err := uc.Execute(context.Background(), inv); err == nil {
 			t.Fatal("expected an error when the cache repository fails")
 		}
+		classifier.AssertNotCalled(t, "Classify", mock.Anything, mock.Anything)
 	})
 
 	t.Run("multiples lineas: una falla y otra no se afectan entre si", func(t *testing.T) {
-		cache := newFakeCache()
-		classifier := &fakeLineClassifier{err: errors.New("timeout")}
+		cache := mocks.NewMockClassificationCacheRepository(t)
+		cache.EXPECT().FindByIssuerAndSKU(mock.Anything, mock.Anything, mock.Anything).Return(nil, nil)
+		cache.EXPECT().FindByDescription(mock.Anything, mock.Anything).Return(nil, nil)
+
+		classifier := mocks.NewMockLineClassifier(t)
+		classifier.EXPECT().Classify(mock.Anything, mock.Anything).Return(nil, errors.New("timeout"))
+
 		uc := usecase.NewClassifyInvoiceLines(cache, classifier)
 
 		inv := baseClassifyInvoice()
@@ -224,5 +192,6 @@ func TestClassifyInvoiceLines_Execute(t *testing.T) {
 				t.Errorf("line %d: ConceptID = %v, want nil (classifier always fails in this test)", i, line.ConceptID)
 			}
 		}
+		classifier.AssertNumberOfCalls(t, "Classify", 2)
 	})
 }

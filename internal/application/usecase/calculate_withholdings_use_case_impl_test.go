@@ -6,75 +6,14 @@ import (
 	"time"
 
 	"github.com/shopspring/decimal"
+	"github.com/stretchr/testify/mock"
 
 	appconfig "cifrato/internal/application/config"
 	"cifrato/internal/application/usecase"
 	"cifrato/internal/domain/entity"
 	"cifrato/internal/domain/enums"
+	"cifrato/internal/domain/repository/mocks"
 )
-
-type fakeTaxRuleRepo struct{ rules []entity.TaxRule }
-
-func (f *fakeTaxRuleRepo) FindApplicable(_ context.Context, taxType enums.TaxType, conceptID uint, cityID *uint, at time.Time) (*entity.TaxRule, error) {
-	for _, r := range f.rules {
-		if r.TaxType != taxType || r.ConceptID != conceptID {
-			continue
-		}
-		if (cityID == nil) != (r.CityID == nil) {
-			continue
-		}
-		if cityID != nil && r.CityID != nil && *cityID != *r.CityID {
-			continue
-		}
-		if at.Before(r.EffectiveFrom) {
-			continue
-		}
-		if r.EffectiveTo != nil && at.After(*r.EffectiveTo) {
-			continue
-		}
-		rc := r
-		return &rc, nil
-	}
-	return nil, nil
-}
-
-func (f *fakeTaxRuleRepo) ListByTaxType(context.Context, enums.TaxType) ([]entity.TaxRule, error) {
-	return nil, nil
-}
-
-type fakeReferenceData struct {
-	cities map[string]entity.City
-	uvt    *entity.UVTValue
-}
-
-func (f *fakeReferenceData) FindConceptByCode(context.Context, string) (*entity.Concept, error) {
-	return nil, nil
-}
-func (f *fakeReferenceData) ListConcepts(context.Context) ([]entity.Concept, error) {
-	return nil, nil
-}
-func (f *fakeReferenceData) FindCityByName(_ context.Context, name string) (*entity.City, error) {
-	c, ok := f.cities[name]
-	if !ok {
-		return nil, nil
-	}
-	cc := c
-	return &cc, nil
-}
-func (f *fakeReferenceData) FindUVTValue(context.Context, time.Time) (*entity.UVTValue, error) {
-	return f.uvt, nil
-}
-
-type fakeCalculationRepo struct{ saved []entity.Calculation }
-
-func (f *fakeCalculationRepo) Upsert(_ context.Context, c *entity.Calculation) error {
-	c.ID = uint(len(f.saved) + 1)
-	f.saved = append(f.saved, *c)
-	return nil
-}
-func (f *fakeCalculationRepo) ListByInvoice(context.Context, uint) ([]entity.Calculation, error) {
-	return nil, nil
-}
 
 const compraBienesConceptID uint = 1
 
@@ -125,13 +64,32 @@ func findByTaxType(calcs []entity.Calculation, tt enums.TaxType) *entity.Calcula
 	return nil
 }
 
+// mockReferenceData stubs FindUVTValue with uvt and FindCityByName to always
+// miss (nil, nil) — the common case across most subtests, since RETEICA is
+// not the thing under test there.
+func mockReferenceData(t *testing.T, uvt *entity.UVTValue) *mocks.MockReferenceDataRepository {
+	ref := mocks.NewMockReferenceDataRepository(t)
+	ref.EXPECT().FindUVTValue(mock.Anything, mock.Anything).Return(uvt, nil)
+	ref.EXPECT().FindCityByName(mock.Anything, mock.Anything).Return(nil, nil)
+	return ref
+}
+
+// mockCalculationRepo stubs Upsert to accept any calculation — the common
+// case across most subtests, since persistence itself isn't what's under test.
+func mockCalculationRepo(t *testing.T) *mocks.MockCalculationRepository {
+	calcs := mocks.NewMockCalculationRepository(t)
+	calcs.EXPECT().Upsert(mock.Anything, mock.Anything).Return(nil)
+	return calcs
+}
+
 func TestCalculateWithholdings_Execute(t *testing.T) {
 	uvt := &entity.UVTValue{Value: decimal.RequireFromString("52374")}
 
 	t.Run("linea supera minimo RETEFUENTE", func(t *testing.T) {
-		taxRules := &fakeTaxRuleRepo{rules: []entity.TaxRule{baseRetefuenteRule()}}
-		calcs := &fakeCalculationRepo{}
-		uc := usecase.NewCalculateWithholdings(taxRules, calcs, &fakeReferenceData{uvt: uvt}, appconfig.Config{})
+		rule := baseRetefuenteRule()
+		taxRules := mocks.NewMockTaxRuleRepository(t)
+		taxRules.EXPECT().FindApplicable(mock.Anything, enums.TaxTypeRetefuente, compraBienesConceptID, mock.Anything, mock.Anything).Return(&rule, nil)
+		uc := usecase.NewCalculateWithholdings(taxRules, mockCalculationRepo(t), mockReferenceData(t, uvt), appconfig.Config{})
 
 		results, err := uc.Execute(context.Background(), baseInvoice())
 		if err != nil {
@@ -149,9 +107,10 @@ func TestCalculateWithholdings_Execute(t *testing.T) {
 	})
 
 	t.Run("linea no supera minimo RETEFUENTE", func(t *testing.T) {
-		taxRules := &fakeTaxRuleRepo{rules: []entity.TaxRule{baseRetefuenteRule()}}
-		calcs := &fakeCalculationRepo{}
-		uc := usecase.NewCalculateWithholdings(taxRules, calcs, &fakeReferenceData{uvt: uvt}, appconfig.Config{})
+		rule := baseRetefuenteRule()
+		taxRules := mocks.NewMockTaxRuleRepository(t)
+		taxRules.EXPECT().FindApplicable(mock.Anything, enums.TaxTypeRetefuente, compraBienesConceptID, mock.Anything, mock.Anything).Return(&rule, nil)
+		uc := usecase.NewCalculateWithholdings(taxRules, mockCalculationRepo(t), mockReferenceData(t, uvt), appconfig.Config{})
 
 		inv := baseInvoice()
 		inv.Lines[0].LineTotal = decimal.RequireFromString("100000") // below 10 UVT ($523,740)
@@ -174,9 +133,12 @@ func TestCalculateWithholdings_Execute(t *testing.T) {
 	})
 
 	t.Run("ciudad sin tarifa ICA", func(t *testing.T) {
-		taxRules := &fakeTaxRuleRepo{}
-		calcs := &fakeCalculationRepo{}
-		uc := usecase.NewCalculateWithholdings(taxRules, calcs, &fakeReferenceData{uvt: uvt, cities: map[string]entity.City{}}, appconfig.Config{})
+		taxRules := mocks.NewMockTaxRuleRepository(t)
+		taxRules.EXPECT().FindApplicable(mock.Anything, enums.TaxTypeRetefuente, compraBienesConceptID, mock.Anything, mock.Anything).Return(nil, nil)
+		ref := mocks.NewMockReferenceDataRepository(t)
+		ref.EXPECT().FindUVTValue(mock.Anything, mock.Anything).Return(uvt, nil)
+		ref.EXPECT().FindCityByName(mock.Anything, "CARTAGENA").Return(nil, nil)
+		uc := usecase.NewCalculateWithholdings(taxRules, mockCalculationRepo(t), ref, appconfig.Config{})
 
 		inv := baseInvoice()
 		inv.IssuerCity = "CARTAGENA"
@@ -200,9 +162,9 @@ func TestCalculateWithholdings_Execute(t *testing.T) {
 	})
 
 	t.Run("comprador no agente de IVA", func(t *testing.T) {
-		taxRules := &fakeTaxRuleRepo{rules: []entity.TaxRule{baseReteivaRule()}}
-		calcs := &fakeCalculationRepo{}
-		uc := usecase.NewCalculateWithholdings(taxRules, calcs, &fakeReferenceData{uvt: uvt}, appconfig.Config{IsVATWithholdingAgent: false})
+		taxRules := mocks.NewMockTaxRuleRepository(t)
+		taxRules.EXPECT().FindApplicable(mock.Anything, enums.TaxTypeRetefuente, compraBienesConceptID, mock.Anything, mock.Anything).Return(nil, nil)
+		uc := usecase.NewCalculateWithholdings(taxRules, mockCalculationRepo(t), mockReferenceData(t, uvt), appconfig.Config{IsVATWithholdingAgent: false})
 
 		results, err := uc.Execute(context.Background(), baseInvoice())
 		if err != nil {
@@ -220,12 +182,15 @@ func TestCalculateWithholdings_Execute(t *testing.T) {
 		if reteiva.Justification != want {
 			t.Errorf("Justification = %q, want %q", reteiva.Justification, want)
 		}
+		// RETEIVA's gate is checked before any repository lookup — FindApplicable
+		// must never be called for RETEIVA when the buyer isn't a withholding agent.
+		taxRules.AssertNotCalled(t, "FindApplicable", mock.Anything, enums.TaxTypeReteiva, mock.Anything, mock.Anything, mock.Anything)
 	})
 
 	t.Run("linea sin ConceptID", func(t *testing.T) {
-		taxRules := &fakeTaxRuleRepo{}
-		calcs := &fakeCalculationRepo{}
-		uc := usecase.NewCalculateWithholdings(taxRules, calcs, &fakeReferenceData{uvt: uvt}, appconfig.Config{})
+		taxRules := mocks.NewMockTaxRuleRepository(t)
+		calcs := mockCalculationRepo(t)
+		uc := usecase.NewCalculateWithholdings(taxRules, calcs, mockReferenceData(t, uvt), appconfig.Config{})
 
 		inv := baseInvoice()
 		inv.Lines[0].ConceptID = nil
@@ -249,16 +214,16 @@ func TestCalculateWithholdings_Execute(t *testing.T) {
 				t.Errorf("%s Justification = %q, want %q", c.TaxType, c.Justification, want)
 			}
 		}
-		if len(calcs.saved) != 3 {
-			t.Errorf("len(calcs.saved) = %d, want 3", len(calcs.saved))
-		}
+		calcs.AssertNumberOfCalls(t, "Upsert", 3)
+		taxRules.AssertNotCalled(t, "FindApplicable", mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything)
 	})
 
 	t.Run("varias lineas del mismo concepto se suman antes de evaluar el minimo", func(t *testing.T) {
 		// Two lines individually below the minimum, but summed together they clear it.
-		taxRules := &fakeTaxRuleRepo{rules: []entity.TaxRule{baseRetefuenteRule()}}
-		calcs := &fakeCalculationRepo{}
-		uc := usecase.NewCalculateWithholdings(taxRules, calcs, &fakeReferenceData{uvt: uvt}, appconfig.Config{})
+		rule := baseRetefuenteRule()
+		taxRules := mocks.NewMockTaxRuleRepository(t)
+		taxRules.EXPECT().FindApplicable(mock.Anything, enums.TaxTypeRetefuente, compraBienesConceptID, mock.Anything, mock.Anything).Return(&rule, nil)
+		uc := usecase.NewCalculateWithholdings(taxRules, mockCalculationRepo(t), mockReferenceData(t, uvt), appconfig.Config{})
 
 		conceptID := compraBienesConceptID
 		inv := baseInvoice()
@@ -288,20 +253,23 @@ func TestCalculateWithholdings_Execute(t *testing.T) {
 		if refuenteCalcs != 1 {
 			t.Errorf("got %d RETEFUENTE calculations, want exactly 1 (one per concept, not one per line)", refuenteCalcs)
 		}
+		// One call for the whole group, not one per line.
+		taxRules.AssertNumberOfCalls(t, "FindApplicable", 1)
 	})
 
 	t.Run("lineas de conceptos distintos producen grupos separados, no se mezclan", func(t *testing.T) {
 		servicioConceptID := uint(2)
-		taxRules := &fakeTaxRuleRepo{rules: []entity.TaxRule{
-			baseRetefuenteRule(), // compra_bienes: 2.5%, min 10 UVT
-			{
-				TaxType: enums.TaxTypeRetefuente, ConceptID: servicioConceptID,
-				MinBaseUVT: decimal.RequireFromString("2"), TariffPercentage: decimal.RequireFromString("4"),
-				LegalBasis: "Art. 392 E.T.", EffectiveFrom: time.Date(2025, 1, 1, 0, 0, 0, 0, time.UTC),
-			},
-		}}
-		calcs := &fakeCalculationRepo{}
-		uc := usecase.NewCalculateWithholdings(taxRules, calcs, &fakeReferenceData{uvt: uvt}, appconfig.Config{})
+		bienesRule := baseRetefuenteRule() // compra_bienes: 2.5%, min 10 UVT
+		servicioRule := entity.TaxRule{
+			TaxType: enums.TaxTypeRetefuente, ConceptID: servicioConceptID,
+			MinBaseUVT: decimal.RequireFromString("2"), TariffPercentage: decimal.RequireFromString("4"),
+			LegalBasis: "Art. 392 E.T.", EffectiveFrom: time.Date(2025, 1, 1, 0, 0, 0, 0, time.UTC),
+		}
+		taxRules := mocks.NewMockTaxRuleRepository(t)
+		taxRules.EXPECT().FindApplicable(mock.Anything, enums.TaxTypeRetefuente, compraBienesConceptID, mock.Anything, mock.Anything).Return(&bienesRule, nil)
+		taxRules.EXPECT().FindApplicable(mock.Anything, enums.TaxTypeRetefuente, servicioConceptID, mock.Anything, mock.Anything).Return(&servicioRule, nil)
+		calcs := mockCalculationRepo(t)
+		uc := usecase.NewCalculateWithholdings(taxRules, calcs, mockReferenceData(t, uvt), appconfig.Config{})
 
 		bienesConceptID := compraBienesConceptID
 		inv := baseInvoice()
@@ -343,12 +311,16 @@ func TestCalculateWithholdings_Execute(t *testing.T) {
 				t.Errorf("unexpected ConceptID %d", *c.ConceptID)
 			}
 		}
+		calcs.AssertNumberOfCalls(t, "Upsert", 6) // 2 concepts x 3 tax types
 	})
 
 	t.Run("factura sin persistir retorna error", func(t *testing.T) {
-		taxRules := &fakeTaxRuleRepo{}
-		calcs := &fakeCalculationRepo{}
-		uc := usecase.NewCalculateWithholdings(taxRules, calcs, &fakeReferenceData{uvt: uvt}, appconfig.Config{})
+		// No expectations set on any mock: Execute must return before touching
+		// any repository, or testify panics on the first unexpected call.
+		taxRules := mocks.NewMockTaxRuleRepository(t)
+		calcs := mocks.NewMockCalculationRepository(t)
+		ref := mocks.NewMockReferenceDataRepository(t)
+		uc := usecase.NewCalculateWithholdings(taxRules, calcs, ref, appconfig.Config{})
 
 		inv := baseInvoice()
 		inv.ID = 0
@@ -356,9 +328,6 @@ func TestCalculateWithholdings_Execute(t *testing.T) {
 		_, err := uc.Execute(context.Background(), inv)
 		if err == nil {
 			t.Fatal("expected an error for an unpersisted invoice")
-		}
-		if len(calcs.saved) != 0 {
-			t.Errorf("expected no repository calls, got %d saved calculations", len(calcs.saved))
 		}
 	})
 }
