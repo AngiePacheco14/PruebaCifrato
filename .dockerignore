@@ -1,0 +1,8 @@
+.git/
+.claude/
+sample-invoices/
+*.md
+!README.md
+docker-compose.yml
+*.exe
+*.test

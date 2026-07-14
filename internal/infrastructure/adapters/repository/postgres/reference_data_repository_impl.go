@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"sync"
 	"time"
 	"unicode"
 
@@ -15,7 +16,16 @@ import (
 	"cifrato/internal/infrastructure/adapters/repository/postgres/model"
 )
 
-type ReferenceDataRepository struct{ db *gorm.DB }
+type ReferenceDataRepository struct {
+	db *gorm.DB
+
+	// conceptsCache holds the withholding-concept catalog: small, seeded
+	// reference data that doesn't change at runtime. ListConcepts is called
+	// once per invoice during batch processing (up to 5 concurrently), so
+	// caching avoids redundant round-trips for data that's already static.
+	conceptsMu    sync.RWMutex
+	conceptsCache []entity.Concept
+}
 
 func NewReferenceDataRepository(db *gorm.DB) *ReferenceDataRepository {
 	return &ReferenceDataRepository{db: db}
@@ -33,6 +43,13 @@ func (r *ReferenceDataRepository) FindConceptByCode(ctx context.Context, code st
 }
 
 func (r *ReferenceDataRepository) ListConcepts(ctx context.Context) ([]entity.Concept, error) {
+	r.conceptsMu.RLock()
+	cached := r.conceptsCache
+	r.conceptsMu.RUnlock()
+	if cached != nil {
+		return cached, nil
+	}
+
 	var rows []model.WithholdingConceptModel
 	if err := r.db.WithContext(ctx).Find(&rows).Error; err != nil {
 		return nil, fmt.Errorf("postgres: listing concepts: %w", err)
@@ -41,6 +58,10 @@ func (r *ReferenceDataRepository) ListConcepts(ctx context.Context) ([]entity.Co
 	for i := range rows {
 		concepts[i] = *mappers.ConceptToDomain(&rows[i])
 	}
+
+	r.conceptsMu.Lock()
+	r.conceptsCache = concepts
+	r.conceptsMu.Unlock()
 	return concepts, nil
 }
 

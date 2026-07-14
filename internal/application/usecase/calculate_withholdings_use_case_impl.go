@@ -104,13 +104,18 @@ func (uc *CalculateWithholdings) Execute(ctx context.Context, inv *entity.Invoic
 		return nil, fmt.Errorf("usecase: finding city %q: %w", inv.IssuerCity, err)
 	}
 
+	conceptNames, err := uc.loadConceptNames(ctx)
+	if err != nil {
+		return nil, err
+	}
+
 	var results []entity.Calculation
 
 	for _, group := range groupLinesByConcept(inv.Lines) {
 		if group.ConceptID == nil {
 			for _, tt := range allTaxTypes {
 				calc := service.NotApplicable(tt, "línea(s) sin concepto clasificado, no se puede determinar la regla aplicable")
-				if err := uc.persist(ctx, inv, nil, calc, &results); err != nil {
+				if err := uc.persist(ctx, inv, nil, conceptNames, calc, &results); err != nil {
 					return results, err
 				}
 			}
@@ -123,7 +128,7 @@ func (uc *CalculateWithholdings) Execute(ctx context.Context, inv *entity.Invoic
 		if err != nil {
 			return results, err
 		}
-		if err := uc.persist(ctx, inv, group.ConceptID, refuenteCalc, &results); err != nil {
+		if err := uc.persist(ctx, inv, group.ConceptID, conceptNames, refuenteCalc, &results); err != nil {
 			return results, err
 		}
 
@@ -131,7 +136,7 @@ func (uc *CalculateWithholdings) Execute(ctx context.Context, inv *entity.Invoic
 		if err != nil {
 			return results, err
 		}
-		if err := uc.persist(ctx, inv, group.ConceptID, reteivaCalc, &results); err != nil {
+		if err := uc.persist(ctx, inv, group.ConceptID, conceptNames, reteivaCalc, &results); err != nil {
 			return results, err
 		}
 
@@ -139,12 +144,26 @@ func (uc *CalculateWithholdings) Execute(ctx context.Context, inv *entity.Invoic
 		if err != nil {
 			return results, err
 		}
-		if err := uc.persist(ctx, inv, group.ConceptID, reteicaCalc, &results); err != nil {
+		if err := uc.persist(ctx, inv, group.ConceptID, conceptNames, reteicaCalc, &results); err != nil {
 			return results, err
 		}
 	}
 
 	return results, nil
+}
+
+// loadConceptNames builds an ID→name lookup from the concept catalog, used
+// to attach a human-readable ConceptName to each Calculation for display.
+func (uc *CalculateWithholdings) loadConceptNames(ctx context.Context) (map[uint]string, error) {
+	concepts, err := uc.referenceData.ListConcepts(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("usecase: listing concepts: %w", err)
+	}
+	names := make(map[uint]string, len(concepts))
+	for _, c := range concepts {
+		names[c.ID] = c.Name
+	}
+	return names, nil
 }
 
 func (uc *CalculateWithholdings) calculateMinimumBaseTax(
@@ -189,9 +208,14 @@ func (uc *CalculateWithholdings) calculateReteica(ctx context.Context, conceptID
 		fmt.Sprintf("sin tarifa RETEICA configurada para la ciudad %s y este concepto vigente a la fecha de la factura", issuerCityName))
 }
 
-func (uc *CalculateWithholdings) persist(ctx context.Context, inv *entity.Invoice, conceptID *uint, calc entity.Calculation, results *[]entity.Calculation) error {
+func (uc *CalculateWithholdings) persist(ctx context.Context, inv *entity.Invoice, conceptID *uint, conceptNames map[uint]string, calc entity.Calculation, results *[]entity.Calculation) error {
 	calc.InvoiceID = inv.ID
 	calc.ConceptID = conceptID
+	if conceptID != nil {
+		if name, ok := conceptNames[*conceptID]; ok {
+			calc.ConceptName = &name
+		}
+	}
 	if err := uc.calculations.Upsert(ctx, &calc); err != nil {
 		return fmt.Errorf("usecase: persisting %s calculation for invoice %d: %w", calc.TaxType, inv.ID, err)
 	}

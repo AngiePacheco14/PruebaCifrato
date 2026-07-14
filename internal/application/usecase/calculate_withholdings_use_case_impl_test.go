@@ -71,7 +71,17 @@ func mockReferenceData(t *testing.T, uvt *entity.UVTValue) *mocks.MockReferenceD
 	ref := mocks.NewMockReferenceDataRepository(t)
 	ref.EXPECT().FindUVTValue(mock.Anything, mock.Anything).Return(uvt, nil)
 	ref.EXPECT().FindCityByName(mock.Anything, mock.Anything).Return(nil, nil)
+	ref.EXPECT().ListConcepts(mock.Anything).Return(testConcepts(), nil)
 	return ref
+}
+
+// testConcepts covers every ConceptID used across this file's subtests
+// (compraBienesConceptID and the ad-hoc servicioConceptID = 2).
+func testConcepts() []entity.Concept {
+	return []entity.Concept{
+		{ID: compraBienesConceptID, Code: "compra_bienes", Name: "Compra de bienes"},
+		{ID: 2, Code: "servicios_generales", Name: "Servicios generales"},
+	}
 }
 
 // mockCalculationRepo stubs Upsert to accept any calculation — the common
@@ -138,6 +148,7 @@ func TestCalculateWithholdings_Execute(t *testing.T) {
 		ref := mocks.NewMockReferenceDataRepository(t)
 		ref.EXPECT().FindUVTValue(mock.Anything, mock.Anything).Return(uvt, nil)
 		ref.EXPECT().FindCityByName(mock.Anything, "CARTAGENA").Return(nil, nil)
+		ref.EXPECT().ListConcepts(mock.Anything).Return(testConcepts(), nil)
 		uc := usecase.NewCalculateWithholdings(taxRules, mockCalculationRepo(t), ref, appconfig.Config{})
 
 		inv := baseInvoice()

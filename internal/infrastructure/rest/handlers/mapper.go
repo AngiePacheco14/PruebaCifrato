@@ -11,6 +11,7 @@ func toProcessInvoiceResponse(result *in.ProcessInvoiceResult) dto.ProcessInvoic
 		calculations[i] = dto.CalculationDTO{
 			TaxType:         string(calc.TaxType),
 			ConceptID:       calc.ConceptID,
+			ConceptName:     calc.ConceptName,
 			BaseAmount:      calc.BaseAmount.String(),
 			TariffApplied:   calc.TariffApplied.String(),
 			CalculatedValue: calc.CalculatedValue.String(),

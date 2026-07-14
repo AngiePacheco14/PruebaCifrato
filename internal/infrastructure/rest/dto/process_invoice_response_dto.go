@@ -23,11 +23,12 @@ type SummaryDTO struct {
 // CalculationDTO is one tax type's result for one concept. BaseAmount sums
 // every line under that concept, not a single line's amount.
 type CalculationDTO struct {
-	TaxType         string `json:"tax_type"`
-	ConceptID       *uint  `json:"concept_id"`
-	BaseAmount      string `json:"base_amount"`
-	TariffApplied   string `json:"tariff_applied"`
-	CalculatedValue string `json:"calculated_value"`
-	LegalBasis      string `json:"legal_basis"`
-	Justification   string `json:"justification"`
+	TaxType         string  `json:"tax_type"`
+	ConceptID       *uint   `json:"concept_id"`
+	ConceptName     *string `json:"concept_name"`
+	BaseAmount      string  `json:"base_amount"`
+	TariffApplied   string  `json:"tariff_applied"`
+	CalculatedValue string  `json:"calculated_value"`
+	LegalBasis      string  `json:"legal_basis"`
+	Justification   string  `json:"justification"`
 }

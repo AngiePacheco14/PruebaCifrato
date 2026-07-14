@@ -106,7 +106,7 @@ Respuesta (`200 OK`):
   },
   "calculations": [
     {
-      "tax_type": "RETEFUENTE", "concept_id": 1,
+      "tax_type": "RETEFUENTE", "concept_id": 1, "concept_name": "Compra de bienes",
       "base_amount": "43738800.00", "tariff_applied": "2.5", "calculated_value": "1093470.00",
       "legal_basis": "Art. 401 E.T.; Decreto 572 de 2025",
       "justification": "base gravable $43738800.00 supera/iguala el mínimo de 10 UVT ($523740.00); se aplica tarifa 2.5%"
@@ -151,7 +151,9 @@ reporta su propio éxito o error en la respuesta.
 | `VAT_WITHHOLDING_AGENT` | `false` | si la empresa compradora es agente de retención de IVA |
 | `ANTHROPIC_API_KEY` | — | credencial para clasificar líneas con Claude; sin ella, la clasificación falla por línea sin bloquear la factura |
 | `CLASSIFIER_MODEL` | `claude-haiku-4-5` | modelo usado para clasificar líneas |
-| `HTTP_ADDR` | `:8080` | dirección de escucha del servidor HTTP |
+| `HTTP_ADDR` | `:8080` | dirección de escucha del servidor HTTP; tiene prioridad sobre `PORT` si ambas están seteadas |
+| `PORT` | — | usada en su lugar si `HTTP_ADDR` no está seteada (Render y otros PaaS la inyectan solos) |
+| `CORS_ALLOWED_ORIGINS` | `http://localhost:5173` | orígenes permitidos para el frontend, separados por coma |
 
 ## Limitaciones conocidas
 
@@ -169,6 +171,35 @@ reporta su propio éxito o error en la respuesta.
 - No hay autenticación en los endpoints — fuera de alcance de esta prueba.
 - Los `WithholdingTaxTotal` que algunas facturas traen del proveedor son solo informativos;
   el motor calcula de forma independiente y no depende de ellos.
+
+## Frontend
+
+El frontend vive en un repo aparte: [PruebaCifrato-Frontend](https://github.com/AngiePacheco14/PruebaCifrato-Frontend)
+— SPA en React + Vite + TypeScript + Tailwind CSS que consume los dos endpoints de arriba. Usa
+siempre `POST /invoices/batch` (incluso para un solo archivo), muestra el resultado por factura
+(retenciones, base, tarifa, justificación) y un resumen agregado cuando hay más de una factura
+en el lote.
+
+Para correrlo en local: cloná ese repo, `cp .env.example .env.local` con `VITE_API_URL`
+apuntando a este backend, `npm install && npm run dev` (`http://localhost:5173`). Con el
+backend corriendo en `:8080` (ver arriba), `CORS_ALLOWED_ORIGINS` ya incluye
+`http://localhost:5173` por defecto — no hace falta configurar nada más para desarrollo local.
+
+## Despliegue
+
+Arquitectura de despliegue: **frontend en Vercel** (desde el repo
+[PruebaCifrato-Frontend](https://github.com/AngiePacheco14/PruebaCifrato-Frontend), variable
+`VITE_API_URL` apuntando al backend público) y **backend + Postgres en Render** (`Dockerfile`
+en la raíz de este repo, variables `DB_*` con los datos del Postgres de Render,
+`RUN_MIGRATIONS=true`, `ANTHROPIC_API_KEY`, `CORS_ALLOWED_ORIGINS` con la URL de Vercel, sin
+setear `HTTP_ADDR` para que tome el `PORT` que Render inyecta). `GET /health` sirve como
+healthcheck.
+
+Limitaciones del free tier de Render (aceptables para una prueba técnica):
+- El web service gratis se "duerme" tras 15 min de inactividad — la primera petición después
+  de eso tarda 30-60s en responder (cold start).
+- La base Postgres gratis expira 30 días después de creada (14 días de gracia antes de
+  borrarse). En producción real esto se resuelve con un plan pago o un servicio siempre activo.
 
 ## Tests
 

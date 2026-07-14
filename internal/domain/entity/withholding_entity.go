@@ -53,6 +53,7 @@ type Calculation struct {
 	InvoiceID       uint
 	TaxType         enums.TaxType
 	ConceptID       *uint
+	ConceptName     *string
 	BaseAmount      decimal.Decimal
 	TariffApplied   decimal.Decimal
 	CalculatedValue decimal.Decimal

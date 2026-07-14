@@ -35,7 +35,13 @@ func main() {
 func serve() {
 	container := dependence.NewWire()
 
+	// PORT is what Render (and most PaaS) inject automatically; HTTP_ADDR is
+	// this app's own convention and wins if explicitly set, so local dev
+	// (.env with HTTP_ADDR=:8080) keeps working unchanged in either context.
 	addr := ":8080"
+	if v := os.Getenv("PORT"); v != "" {
+		addr = ":" + v
+	}
 	if v := os.Getenv("HTTP_ADDR"); v != "" {
 		addr = v
 	}
