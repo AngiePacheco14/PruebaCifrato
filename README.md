@@ -1,5 +1,10 @@
 # Cifrato — Motor de retenciones sobre facturas electrónicas
 
+**Demo en vivo:** [prueba-cifrato-frontend.vercel.app](https://prueba-cifrato-frontend.vercel.app/)
+— backend público en `https://pruebacifrato.onrender.com`. Ver la sección
+[Despliegue](#despliegue) para las particularidades del free tier antes de probarlo (cold
+start, expiración de la base).
+
 Servicio en Go que recibe facturas electrónicas colombianas (XML UBL DIAN) y calcula
 automáticamente las retenciones que aplican — **ReteFuente**, **ReteIVA** y **ReteICA** —
 devolviendo para cada una la base gravable, la tarifa aplicada, el valor y la norma legal
@@ -187,19 +192,26 @@ backend corriendo en `:8080` (ver arriba), `CORS_ALLOWED_ORIGINS` ya incluye
 
 ## Despliegue
 
-Arquitectura de despliegue: **frontend en Vercel** (desde el repo
-[PruebaCifrato-Frontend](https://github.com/AngiePacheco14/PruebaCifrato-Frontend), variable
-`VITE_API_URL` apuntando al backend público) y **backend + Postgres en Render** (`Dockerfile`
-en la raíz de este repo, variables `DB_*` con los datos del Postgres de Render,
-`RUN_MIGRATIONS=true`, `ANTHROPIC_API_KEY`, `CORS_ALLOWED_ORIGINS` con la URL de Vercel, sin
-setear `HTTP_ADDR` para que tome el `PORT` que Render inyecta). `GET /health` sirve como
-healthcheck.
+- **Frontend (Vercel):** https://prueba-cifrato-frontend.vercel.app/ — desde el repo
+  [PruebaCifrato-Frontend](https://github.com/AngiePacheco14/PruebaCifrato-Frontend), variable
+  `VITE_API_URL` apuntando al backend público.
+- **Backend (Render):** https://pruebacifrato.onrender.com — `Dockerfile` en la raíz de este
+  repo, variables `DB_*` con los datos del Postgres de Render, `RUN_MIGRATIONS=true`,
+  `ANTHROPIC_API_KEY`, `CORS_ALLOWED_ORIGINS` con la URL de Vercel de arriba, sin setear
+  `HTTP_ADDR` para que tome el `PORT` que Render inyecta. `GET /health` sirve como healthcheck.
 
-Limitaciones del free tier de Render (aceptables para una prueba técnica):
-- El web service gratis se "duerme" tras 15 min de inactividad — la primera petición después
-  de eso tarda 30-60s en responder (cold start).
-- La base Postgres gratis expira 30 días después de creada (14 días de gracia antes de
-  borrarse). En producción real esto se resuelve con un plan pago o un servicio siempre activo.
+### Cosas a tener en cuenta sobre el link público (free tier, no son bugs)
+
+- **Cold start del backend**: tras ~15 min sin tráfico, Render "duerme" el servicio gratis —
+  la primera petición después de eso tarda **30-60 segundos** en responder (las siguientes son
+  normales). Si al abrir la demo la carga inicial de una factura tarda, es esto, no un error.
+  El frontend en Vercel no tiene este problema, es estático.
+- **Expiración de la base de datos**: el Postgres gratis de Render expira 30 días después de
+  creado (14 días de gracia antes de borrarse definitivamente). Si estás leyendo esto mucho
+  después de la entrega y el enlace ya no calcula nada, probablemente la base expiró — avisen
+  y la recreo, o pueden correr el proyecto en local siguiendo las instrucciones de este README.
+- **CORS solo cubre el dominio de producción de Vercel** (el de arriba), no los preview
+  deployments que Vercel genera automáticamente en otras ramas.
 
 ## Tests
 
